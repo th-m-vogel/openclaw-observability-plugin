@@ -41,9 +41,20 @@ let gatewayStopFinalizationStarted = false;
 
 /**
  * Detect whether the current process is running a plugin-management CLI
- * command (install / inspect / doctor / list / uninstall). These commands
- * only validate and load the plugin entry point; they must not start
- * long-lived exporters or background timers, otherwise the CLI never exits.
+ * command (install / inspect / doctor / list / uninstall) or another
+ * one-shot CLI command that eagerly loads every plugin's register() without
+ * running the plugin as a long-lived gateway. These commands only validate
+ * and load the plugin entry point; they must not start long-lived exporters
+ * or background timers, otherwise the CLI never exits.
+ *
+ * `openclaw completion --write-state` is the other confirmed case: it calls
+ * `registerPluginCliCommandsFromValidatedConfig(..., { mode: "eager" })` to
+ * harvest each plugin's CLI commands for the shell-completion script. That
+ * invokes this plugin's real register(), but the process never fires
+ * `gateway_stop`, so without this guard the plugin starts live OTel
+ * exporters/timers that keep the process alive until an external timeout
+ * kills it (observed: hangs the "completion" stage of `openclaw update`
+ * indefinitely, causing the update to time out and exit prematurely).
  */
 function isPluginMgmtContext(): boolean {
   const argv = process.argv.slice(1);
@@ -57,13 +68,21 @@ function isPluginMgmtContext(): boolean {
   ] as const;
   const pluginMgmtSubcommandSet = new Set<string>(pluginMgmtSubcommands);
 
-  return argv.some((arg, index) => {
+  const isPluginsSubcommand = argv.some((arg, index) => {
     const normalizedArg = arg.toLowerCase();
     const nextArg = argv[index + 1]?.toLowerCase();
     return normalizedArg === "plugins" &&
       nextArg !== undefined &&
       pluginMgmtSubcommandSet.has(nextArg);
   });
+  if (isPluginsSubcommand) return true;
+
+  // Other one-shot top-level commands that eagerly register plugins
+  // without an accompanying `gateway_stop` lifecycle event.
+  const oneShotTopLevelCommands = ["completion"] as const;
+  const oneShotTopLevelCommandSet = new Set<string>(oneShotTopLevelCommands);
+
+  return argv.some((arg) => oneShotTopLevelCommandSet.has(arg.toLowerCase()));
 }
 
 // ── Public re-exports ───────────────────────────────────────────────
