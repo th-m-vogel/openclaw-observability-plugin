@@ -608,3 +608,29 @@ describe("buildLogAttributes (ISI-995 log-attribute dedup)", () => {
     expect(attrs["openclaw.log.extra.apiKey"]).toBe("[REDACTED_API_KEY]");
   });
 });
+
+describe("log pipeline — per-signal endpoint override (FR #72)", () => {
+  it("uses the per-signal logs endpoint when set, independent of the shared endpoint", () => {
+    const config = createConfig({
+      signalEndpoints: { logs: "http://127.0.0.1:14320" },
+      signalHeaders: { logs: { APIKEY: "logs-only-key" } },
+    });
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const pipeline = initLogPipeline(config, logger);
+    expect(pipeline).not.toBeNull();
+    expect(logger.info).toHaveBeenCalledWith(
+      "[otel-logs] Log exporter → http://127.0.0.1:14320/v1/logs (http)",
+    );
+    void pipeline?.shutdown();
+  });
+
+  it("falls back to the shared endpoint when no logs override is set", () => {
+    const config = createConfig();
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const pipeline = initLogPipeline(config, logger);
+    expect(logger.info).toHaveBeenCalledWith(
+      "[otel-logs] Log exporter → http://localhost:4318/v1/logs (http)",
+    );
+    void pipeline?.shutdown();
+  });
+});
