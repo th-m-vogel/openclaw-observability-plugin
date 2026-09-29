@@ -305,6 +305,30 @@ describe("parseConfig — per-signal endpoint/header overrides", () => {
       traces: { APIKEY: "traces-key" },
     });
   });
+
+  it("ignores non-object per-signal header values", () => {
+    const cfg = parseConfig({
+      signalHeaders: { metrics: "not-an-object" as any, logs: 42 as any },
+    });
+    expect(cfg.signalHeaders).toBeUndefined();
+  });
+
+  it("ignores unknown signal keys in signalHeaders", () => {
+    const cfg = parseConfig({
+      signalHeaders: { somethingElse: { APIKEY: "x" } } as any,
+    });
+    expect(cfg.signalHeaders).toBeUndefined();
+  });
+
+  it("rejects a non-object signalHeaders value", () => {
+    const cfg = parseConfig({ signalHeaders: "not-an-object" as any });
+    expect(cfg.signalHeaders).toBeUndefined();
+  });
+
+  it("rejects an array as signalHeaders", () => {
+    const cfg = parseConfig({ signalHeaders: [] as any });
+    expect(cfg.signalHeaders).toBeUndefined();
+  });
 });
 
 describe("resolveSignalConfig", () => {
