@@ -280,7 +280,7 @@ export function initLogPipeline(
 
   const logsSignal = resolveSignalConfig(config, "logs");
   const logEndpoint =
-    config.protocol === "http"
+    config.protocol === "http" && !logsSignal.isOverride
       ? `${logsSignal.endpoint}/v1/logs`
       : logsSignal.endpoint;
 

@@ -610,16 +610,21 @@ describe("buildLogAttributes (ISI-995 log-attribute dedup)", () => {
 });
 
 describe("log pipeline — per-signal endpoint override (FR #72)", () => {
-  it("uses the per-signal logs endpoint when set, independent of the shared endpoint", () => {
+  it("uses the per-signal logs endpoint verbatim (no /v1/logs suffix appended), independent of the shared endpoint", () => {
+    // IONOS's own Logging Service ingestion URL is a complete path ending
+    // in the pipeline's tag (`https://<host>/<tag>`) — it never accepts a
+    // `/v1/logs` suffix. A per-signal override must be used as-is so this
+    // shape (and any other backend with its own complete-URL contract) is
+    // actually expressible; only the shared `endpoint` still gets suffixed.
     const config = createConfig({
-      signalEndpoints: { logs: "http://127.0.0.1:14320" },
+      signalEndpoints: { logs: "http://127.0.0.1:14320/openclaw" },
       signalHeaders: { logs: { APIKEY: "logs-only-key" } },
     });
     const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const pipeline = initLogPipeline(config, logger);
     expect(pipeline).not.toBeNull();
     expect(logger.info).toHaveBeenCalledWith(
-      "[otel-logs] Log exporter → http://127.0.0.1:14320/v1/logs (http)",
+      "[otel-logs] Log exporter → http://127.0.0.1:14320/openclaw (http)",
     );
     void pipeline?.shutdown();
   });

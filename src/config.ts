@@ -277,14 +277,25 @@ function parseSignalHeaders(
  * from `signalEndpoints`/`signalHeaders` if set, otherwise the shared
  * `endpoint`/`headers`. Used by `telemetry.ts` (traces, metrics) and
  * `logs.ts` (logs) so all three exporters share one resolution rule.
+ *
+ * `isOverride` tells the caller whether the returned `endpoint` came from
+ * a per-signal override (verbatim — use as-is, mirroring the OTel spec's
+ * `OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT` semantics) or the shared
+ * `endpoint` (still gets `/v1/<signal>` appended under HTTP, matching the
+ * base `OTEL_EXPORTER_OTLP_ENDPOINT` behavior). Real per-signal backends
+ * (e.g. IONOS: traces takes no `/otlp` prefix, logs is a complete
+ * `/<tag>` path with no `/v1/logs` suffix at all) can't be expressed if a
+ * fixed suffix is always appended, which is why overrides must be verbatim.
  */
 export function resolveSignalConfig(
   config: OtelObservabilityConfig,
   signal: OtelSignal,
-): { endpoint: string; headers: Record<string, string> } {
+): { endpoint: string; headers: Record<string, string>; isOverride: boolean } {
+  const override = config.signalEndpoints?.[signal];
   return {
-    endpoint: config.signalEndpoints?.[signal] ?? config.endpoint,
+    endpoint: override ?? config.endpoint,
     headers: config.signalHeaders?.[signal] ?? config.headers,
+    isOverride: override !== undefined,
   };
 }
 

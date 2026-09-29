@@ -334,16 +334,19 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
   });
 
   // Resolve per-signal endpoint/header overrides (falls back to the
-  // shared `endpoint`/`headers` when unset), then append the HTTP path
-  // suffix OTLP/HTTP expects. gRPC uses the resolved endpoint as-is.
+  // shared `endpoint`/`headers` when unset). The shared `endpoint` gets
+  // the HTTP path suffix OTLP/HTTP expects appended; a per-signal
+  // override is used verbatim (real per-signal backends, e.g. IONOS,
+  // have shapes a fixed suffix can't express — see resolveSignalConfig's
+  // doc comment). gRPC always uses the resolved endpoint as-is.
   const traceSignal = resolveSignalConfig(config, "traces");
   const metricsSignal = resolveSignalConfig(config, "metrics");
   const traceEndpoint =
-    config.protocol === "http"
+    config.protocol === "http" && !traceSignal.isOverride
       ? `${traceSignal.endpoint}/v1/traces`
       : traceSignal.endpoint;
   const metricsEndpoint =
-    config.protocol === "http"
+    config.protocol === "http" && !metricsSignal.isOverride
       ? `${metricsSignal.endpoint}/v1/metrics`
       : metricsSignal.endpoint;
 
