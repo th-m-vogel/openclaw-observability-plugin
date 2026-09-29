@@ -177,4 +177,48 @@ describe("telemetry runtime lifecycle", () => {
 
     expect(unrelatedForceFlush).not.toHaveBeenCalled();
   });
+
+  it("uses the per-signal traces endpoint override when set, leaving metrics on the shared endpoint", async () => {
+    const logger = makeLoggerSpy();
+    track(
+      initTelemetry(
+        baseConfig({
+          traces: true,
+          metrics: true,
+          signalEndpoints: { traces: "http://127.0.0.1:14319" },
+        }),
+        logger,
+      ),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[otel] Trace exporter → http://127.0.0.1:14319/v1/traces",
+      ),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[otel] Metrics exporter → http://127.0.0.1:14318/v1/metrics",
+      ),
+    );
+  });
+
+  it("uses the per-signal endpoint as-is (no /v1/... suffix) under grpc protocol", async () => {
+    const logger = makeLoggerSpy();
+    track(
+      initTelemetry(
+        baseConfig({
+          protocol: "grpc",
+          traces: true,
+          metrics: false,
+          signalEndpoints: { traces: "http://127.0.0.1:24317" },
+        }),
+        logger,
+      ),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[otel] Trace exporter → http://127.0.0.1:24317 (grpc)",
+      ),
+    );
+  });
 });
