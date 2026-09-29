@@ -99,3 +99,9 @@ Until one of these is implemented, the hook-based approach provides solid observ
 ## Loki backends may not show a real `service_name` label
 
 Some Loki-backed OTLP ingestion pipelines (confirmed with IONOS Cloud Observability's Logging Service) do not map the OTel `service.name` resource attribute into a Loki stream label — every log stream shows `service_name="unknown_service"` in Grafana regardless of what `serviceName` this plugin's config sets. This is not a plugin bug: the plugin sets `service.name` identically on the metrics, trace, and log `Resource` (see `src/telemetry.ts` and `src/logs.ts`), and metrics/traces on the same backend correctly carry service identity. The gap is specific to how that Loki pipeline maps OTLP resource attributes to stream labels. Workaround: use the pipeline's own fixed `tag` (or another label the pipeline does propagate) for service identification in Loki queries/dashboards, and put `service.name` in the log body/structured attributes if you need it visible per-record.
+
+---
+
+## `gen_ai_provider_name` may be missing or inconsistent
+
+Some token-usage metrics and spans are missing the `gen_ai_provider_name` label, or carry it inconsistently across calls to the exact same model/session. Confirmed present for both Anthropic-native and IONOS-routed (Qwen) calls, which rules out a per-backend cause. The plugin reads `event.provider`/`ctx.provider` from OpenClaw core's own `model.usage` event at every call site (see `src/hooks.ts`) and has no independent, reliable signal to backfill from when core omits it. Likely root cause is upstream in OpenClaw core, tracked as [openclaw/openclaw#153244](https://github.com/openclaw/openclaw/issues/153244). Workaround: group Grafana panels/queries by `gen_ai_response_model` instead of `gen_ai_provider_name` until core's event is fixed.
