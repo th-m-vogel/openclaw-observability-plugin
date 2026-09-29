@@ -102,6 +102,8 @@ For OTLP/gRPC endpoints (port 4317):
 
 For backends that expose a **separate ingestion URL per signal** instead of one shared OTLP endpoint (e.g. IONOS Cloud Observability: Mimir for metrics, Loki for logs, Tempo for traces), set `signalEndpoints` (and optionally `signalHeaders`) alongside the existing `endpoint`/`headers`. Any signal not listed falls back to the shared `endpoint`/`headers` — this is fully backward compatible with existing configs.
 
+**Per-signal endpoints are used verbatim — no `/v1/<signal>` suffix is appended**, unlike the shared `endpoint` (which still gets suffixed for HTTP). This mirrors the OTel spec's distinction between the base `OTEL_EXPORTER_OTLP_ENDPOINT` (suffixed) and the signal-specific `OTEL_EXPORTER_OTLP_{TRACES,METRICS,LOGS}_ENDPOINT` variables (used as-is). It's also required to express real per-signal backend shapes that don't follow a fixed suffix rule — e.g. IONOS's own three pipelines each want a differently-shaped complete URL:
+
 ```json
 {
   "plugins": {
@@ -111,14 +113,14 @@ For backends that expose a **separate ingestion URL per signal** instead of one 
         "config": {
           "protocol": "http",
           "signalEndpoints": {
-            "metrics": "https://<pipeline-id>-metrics.<tenant>.monitoring.<region>.ionos.com/otlp",
-            "logs": "https://<pipeline-id>-logs.<tenant>.logging.<region>.ionos.com",
-            "traces": "https://<pipeline-id>-traces.<tenant>.tracing.<region>.ionos.com/otlp"
+            "metrics": "https://<pipeline-id>-metrics.<tenant>.monitoring.<region>.ionos.com/otlp/v1/metrics",
+            "traces": "https://<pipeline-id>-traces.<tenant>.tracing.<region>.ionos.com/v1/traces",
+            "logs": "https://<pipeline-id>-logs.<tenant>.logging.<region>.ionos.com/<tag>"
           },
           "signalHeaders": {
             "metrics": { "APIKEY": "<metrics-pipeline-key>" },
-            "logs": { "APIKEY": "<logs-pipeline-key>" },
-            "traces": { "APIKEY": "<traces-pipeline-key>" }
+            "traces": { "APIKEY": "<traces-pipeline-key>" },
+            "logs": { "APIKEY": "<logs-pipeline-key>" }
           }
         }
       }
@@ -126,6 +128,8 @@ For backends that expose a **separate ingestion URL per signal** instead of one 
   }
 }
 ```
+
+Note IONOS's traces endpoint has **no** `/otlp` prefix (unlike metrics), and logs ends in the pipeline's own `/<tag>` path rather than `/v1/logs` — since overrides are verbatim, both are expressible even though they don't follow the same shape as each other or as the shared `endpoint`'s suffix rule.
 
 `signalHeaders` **replaces** `headers` entirely for that signal (it is not merged) — set the full header set for that signal's backend, including any shared headers you still need.
 
