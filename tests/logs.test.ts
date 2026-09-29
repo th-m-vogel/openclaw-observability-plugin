@@ -9,6 +9,18 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+// Wrap (not replace) the real exporter constructor so the log pipeline's
+// BatchLogRecordProcessor still gets a genuine, functioning exporter —
+// existing tests are unaffected — while letting header-wiring tests assert
+// exactly what the exporter was constructed with (the endpoint string alone
+// doesn't prove `signalHeaders.logs` was actually threaded through, only
+// that `config.headers` wasn't silently used instead).
+vi.mock("@opentelemetry/exporter-logs-otlp-http", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opentelemetry/exporter-logs-otlp-http")>();
+  return { ...actual, OTLPLogExporter: vi.fn((opts: any) => new actual.OTLPLogExporter(opts)) };
+});
+
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import {
   bridgeGatewayLogger,
   buildLogAttributes,
@@ -625,6 +637,23 @@ describe("log pipeline — per-signal endpoint override (FR #72)", () => {
     expect(pipeline).not.toBeNull();
     expect(logger.info).toHaveBeenCalledWith(
       "[otel-logs] Log exporter → http://127.0.0.1:14320/openclaw (http)",
+    );
+    void pipeline?.shutdown();
+  });
+
+  it("passes signalHeaders.logs to the log exporter, not the shared headers", () => {
+    const config = createConfig({
+      headers: { Authorization: "Bearer shared" },
+      signalEndpoints: { logs: "http://127.0.0.1:14320/openclaw" },
+      signalHeaders: { logs: { APIKEY: "logs-only-key" } },
+    });
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const pipeline = initLogPipeline(config, logger);
+    expect(OTLPLogExporter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "http://127.0.0.1:14320/openclaw",
+        headers: { APIKEY: "logs-only-key" },
+      }),
     );
     void pipeline?.shutdown();
   });

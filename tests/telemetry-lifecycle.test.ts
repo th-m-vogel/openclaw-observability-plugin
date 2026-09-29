@@ -3,6 +3,23 @@ import { trace, type TracerProvider } from "@opentelemetry/api";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { MeterProvider } from "@opentelemetry/sdk-metrics";
 
+// Wrap (not replace) the real exporter constructors so BatchSpanProcessor /
+// PeriodicExportingMetricReader still get a genuine, functioning exporter —
+// existing lifecycle tests that flush/shutdown real providers are
+// unaffected — while letting header-wiring tests assert exactly what each
+// exporter was constructed with (endpoint construction alone can't catch a
+// traces/metrics header swap; only inspecting the actual constructor call can).
+vi.mock("@opentelemetry/exporter-trace-otlp-http", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opentelemetry/exporter-trace-otlp-http")>();
+  return { ...actual, OTLPTraceExporter: vi.fn((opts: any) => new actual.OTLPTraceExporter(opts)) };
+});
+vi.mock("@opentelemetry/exporter-metrics-otlp-http", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opentelemetry/exporter-metrics-otlp-http")>();
+  return { ...actual, OTLPMetricExporter: vi.fn((opts: any) => new actual.OTLPMetricExporter(opts)) };
+});
+
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { CONTENT_POLICY_DISABLED, type OtelObservabilityConfig } from "../src/config.js";
 import { PRELOADED_OTEL_SDK_ENV, initTelemetry, type TelemetryRuntime } from "../src/telemetry.js";
 
@@ -230,6 +247,36 @@ describe("telemetry runtime lifecycle", () => {
       expect.stringContaining(
         "[otel] Metrics exporter → http://127.0.0.1:14318/otlp/v1/metrics (http",
       ),
+    );
+  });
+
+  it("passes each signal's own headers to its own exporter — not swapped, not the shared headers", async () => {
+    // Endpoint-string assertions alone can't catch a traces/metrics
+    // header swap in telemetry.ts; only inspecting what each exporter
+    // constructor actually received can.
+    track(
+      initTelemetry(
+        baseConfig({
+          traces: true,
+          metrics: true,
+          headers: { Authorization: "Bearer shared" },
+          signalEndpoints: { traces: "http://127.0.0.1:14319/v1/traces" },
+          signalHeaders: { traces: { APIKEY: "traces-only-key" } },
+        }),
+        makeLoggerSpy(),
+      ),
+    );
+    expect(OTLPTraceExporter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "http://127.0.0.1:14319/v1/traces",
+        headers: { APIKEY: "traces-only-key" },
+      }),
+    );
+    expect(OTLPMetricExporter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "http://127.0.0.1:14318/v1/metrics",
+        headers: { Authorization: "Bearer shared" },
+      }),
     );
   });
 
