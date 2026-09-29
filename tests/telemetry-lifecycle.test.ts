@@ -178,26 +178,57 @@ describe("telemetry runtime lifecycle", () => {
     expect(unrelatedForceFlush).not.toHaveBeenCalled();
   });
 
-  it("uses the per-signal traces endpoint override when set, leaving metrics on the shared endpoint", async () => {
+  it("uses a per-signal traces endpoint override verbatim (no /v1/traces suffix appended), leaving metrics on the shared (suffixed) endpoint", async () => {
+    // Real IONOS ingestion shapes differ per signal in ways a fixed
+    // "append /v1/<signal>" rule can't express (traces wants no /otlp
+    // prefix at all; logs wants an arbitrary /<tag> path, never /v1/logs).
+    // Per-signal overrides must therefore be used as-is, mirroring the
+    // OTel spec's OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT semantics (used
+    // verbatim) as opposed to the base OTEL_EXPORTER_OTLP_ENDPOINT
+    // (suffixed). Only the shared `endpoint` still gets suffixed.
     const logger = makeLoggerSpy();
     track(
       initTelemetry(
         baseConfig({
           traces: true,
           metrics: true,
-          signalEndpoints: { traces: "http://127.0.0.1:14319" },
+          signalEndpoints: { traces: "http://127.0.0.1:14319/v1/traces" },
         }),
         logger,
       ),
     );
     expect(logger.info).toHaveBeenCalledWith(
       expect.stringContaining(
-        "[otel] Trace exporter → http://127.0.0.1:14319/v1/traces",
+        "[otel] Trace exporter → http://127.0.0.1:14319/v1/traces (http)",
       ),
+    );
+    expect(logger.info).not.toHaveBeenCalledWith(
+      expect.stringContaining("/v1/traces/v1/traces"),
     );
     expect(logger.info).toHaveBeenCalledWith(
       expect.stringContaining(
         "[otel] Metrics exporter → http://127.0.0.1:14318/v1/metrics",
+      ),
+    );
+  });
+
+  it("uses a per-signal metrics endpoint override verbatim, matching IONOS's own full-path pipeline URLs", async () => {
+    const logger = makeLoggerSpy();
+    track(
+      initTelemetry(
+        baseConfig({
+          metrics: true,
+          traces: false,
+          signalEndpoints: {
+            metrics: "http://127.0.0.1:14318/otlp/v1/metrics",
+          },
+        }),
+        logger,
+      ),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[otel] Metrics exporter → http://127.0.0.1:14318/otlp/v1/metrics (http",
       ),
     );
   });

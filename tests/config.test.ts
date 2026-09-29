@@ -332,6 +332,7 @@ describe("resolveSignalConfig", () => {
       expect(resolveSignalConfig(config, signal)).toEqual({
         endpoint: "http://localhost:4318",
         headers: { Authorization: "Bearer shared" },
+        isOverride: false,
       });
     }
   });
@@ -344,15 +345,27 @@ describe("resolveSignalConfig", () => {
     expect(resolveSignalConfig(config, "logs")).toEqual({
       endpoint: "https://logs.example.com/otlp",
       headers: { APIKEY: "logs-key" },
+      isOverride: true,
     });
     expect(resolveSignalConfig(config, "metrics")).toEqual({
       endpoint: "http://localhost:4318",
       headers: { Authorization: "Bearer shared" },
+      isOverride: false,
     });
     expect(resolveSignalConfig(config, "traces")).toEqual({
       endpoint: "http://localhost:4318",
       headers: { Authorization: "Bearer shared" },
+      isOverride: false,
     });
+  });
+
+  it("reports isOverride so callers can skip suffix-appending for verbatim per-signal URLs", () => {
+    const config = baseConfig({
+      signalEndpoints: { metrics: "https://metrics.example.com/otlp/v1/metrics" },
+    });
+    expect(resolveSignalConfig(config, "metrics").isOverride).toBe(true);
+    expect(resolveSignalConfig(config, "logs").isOverride).toBe(false);
+    expect(resolveSignalConfig(config, "traces").isOverride).toBe(false);
   });
 
   it("overrides all three signals independently", () => {
