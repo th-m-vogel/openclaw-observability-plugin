@@ -7,6 +7,18 @@ OpenTelemetry observability for [OpenClaw](https://github.com/openclaw/openclaw)
 
 📖 **[Full Documentation](https://henrikrexed.github.io/openclaw-observability-plugin/)** — Setup guides, configuration reference, and backend examples.
 
+## This fork
+
+`th-m-vogel/openclaw-observability-plugin` is a maintained fork of the upstream project above. Upstream (`henrikrexed/openclaw-observability-plugin`) has had no maintainer activity since 2026-07-20 — including no response to unrelated contributors' trivial, uncontroversial PRs — so this fork treats itself as the canonical, actively maintained version rather than waiting on upstream merges.
+
+**Current state (2026-10-02):** running in production against a live OpenClaw gateway, confirmed stable:
+
+- **Native per-signal OTLP endpoint support** ([PR #1](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/1), implements upstream [FR #72](https://github.com/henrikrexed/openclaw-observability-plugin/issues/72)) — lets one plugin config route metrics/logs/traces to three separate backend URLs instead of one shared endpoint. Live-verified: metrics, logs, and traces all ingesting correctly end-to-end. **Intentionally left open, unmerged** pending a decision on this fork's long-term name/identity (expected this week) — not blocked on anything technical.
+- **`openclaw completion` / `doctor` / `update` no longer hang** — a plugin bug caused these CLI commands (and the post-update completion-cache refresh `openclaw update` runs automatically) to hang indefinitely, since the plugin didn't recognize them as one-shot commands and started full telemetry export instead. Fixed and merged into `main`; confirmed working.
+- **OpenClaw 9.7 crash-loop mitigation** ([PR #2](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/2), merged 2026-10-01) — OpenClaw 9.7 introduced a core regression where an unhandled promise rejection with `reason=undefined` crashes the gateway on every agent turn; this affects the upstream plugin too, not something this fork caused. Mitigated by registering a handler in OpenClaw's internal rejection registry; the underlying 9.7 regression itself remains open upstream in OpenClaw core.
+
+See [`CHANGELOG.md`](CHANGELOG.md) and the linked PRs above for the full incident history.
+
 ## Support matrix
 
 The plugin follows a two-track support model. Pick the plugin track that matches your OpenClaw Gateway version. See [`SUPPORT.md`](SUPPORT.md) for the full policy, and [`CONTRIBUTING.md`](CONTRIBUTING.md#backports-to-release01x) for the backport workflow.
