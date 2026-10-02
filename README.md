@@ -11,13 +11,13 @@ OpenTelemetry observability for [OpenClaw](https://github.com/openclaw/openclaw)
 
 `th-m-vogel/openclaw-observability-plugin` is a maintained fork of the upstream project above. Upstream (`henrikrexed/openclaw-observability-plugin`) has had no maintainer activity since 2026-07-20 — including no response to unrelated contributors' trivial, uncontroversial PRs — so this fork treats itself as the canonical, actively maintained version rather than waiting on upstream merges.
 
-**Current state (2026-10-02):** running in production against a live OpenClaw gateway, confirmed stable:
+**Current release: `0.9.2`**, running in production against a live OpenClaw gateway. Changes since `0.9.1`:
 
-- **Native per-signal OTLP endpoint support** ([PR #1](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/1), implements upstream [FR #72](https://github.com/henrikrexed/openclaw-observability-plugin/issues/72)) — lets one plugin config route metrics/logs/traces to three separate backend URLs instead of one shared endpoint. Live-verified: metrics, logs, and traces all ingesting correctly end-to-end. **Intentionally left open, unmerged** pending a decision on this fork's long-term name/identity (expected this week) — not blocked on anything technical.
-- **`openclaw completion` / `doctor` / `update` no longer hang** — a plugin bug caused these CLI commands (and the post-update completion-cache refresh `openclaw update` runs automatically) to hang indefinitely, since the plugin didn't recognize them as one-shot commands and started full telemetry export instead. Fixed and merged into `main`; confirmed working.
-- **OpenClaw 9.7 crash-loop mitigation** ([PR #2](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/2), merged 2026-10-01) — OpenClaw 9.7 introduced a core regression where an unhandled promise rejection with `reason=undefined` crashes the gateway on every agent turn; this affects the upstream plugin too, not something this fork caused. Mitigated by registering a handler in OpenClaw's internal rejection registry; the underlying 9.7 regression itself remains open upstream in OpenClaw core.
+- **Fixed a log-timestamp corruption bug** — exported log records had their timestamp double-converted to nanoseconds, landing roughly 57 million years in the future. Backends that validate timestamp plausibility (e.g. Grafana Loki) silently dropped every record, with no error surfaced anywhere in the pipeline. Confirmed fixed.
+- **Fixed `openclaw completion` / `doctor` / `update` hanging indefinitely** — the plugin didn't recognize these as one-shot CLI commands (including the post-update completion-cache refresh `openclaw update` runs automatically) and started full telemetry export instead, so the process never exited. Confirmed fixed.
+- **OpenClaw 9.7 crash-loop — mitigated, not resolved, ongoing.** OpenClaw 9.7 introduced a core regression where an unhandled promise rejection with `reason=undefined` crashes the gateway on every agent turn. This affects the upstream plugin too — it is not caused by this fork. Mitigated here by registering a handler in OpenClaw's internal rejection registry; the underlying regression itself remains open in OpenClaw core, so this stays a workaround until core fixes it.
 
-See [`CHANGELOG.md`](CHANGELOG.md) and the linked PRs above for the full incident history.
+See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
 ## Support matrix
 
@@ -30,9 +30,19 @@ The plugin follows a two-track support model. Pick the plugin track that matches
 | `0.3.x`      | `>= 2026.4.21`    | `main`           | Active — V3 features, log pipeline, bug fixes             | Default going forward                          |
 | `0.6.x`      | `>= 2026.5.13`    | `main`           | Superseded by 0.7.x / 0.8.x                              | Replaced by 0.8.x                             |
 | `0.7.x`      | `>= 2026.5.13`    | `main`           | Superseded by 0.8.x                                     | Replaced by 0.8.x                             |
-| `0.8.x`      | `>= 2026.5.13`    | `main`           | Active — GenAI content keys, compaction & subagent spans, tool-error previews | Latest release                                 |
+| `0.8.x`      | `>= 2026.5.13`    | `main`           | Superseded by 0.9.x                                      | Replaced by 0.9.x                              |
+| `0.9.x`      | `>= 2026.4.21`    | `main`           | **Active (this fork)** — log-timestamp fix, completion/doctor/update hang fix, OpenClaw 9.7 crash-loop mitigation (**9.7 support ongoing** — mitigation in place, root cause still open in OpenClaw core) | Latest release                                 |
 
 > OpenClaw `2026.4.21` introduced the `before_model_resolve` and `before_prompt_build` hooks and deprecated `before_agent_start`. The `0.2.x` line targets the new hooks; the `0.1.x` line remains on the legacy hook for existing deployments.
+
+## What's New in 0.9.2
+
+**Released:** 2026-10-02 (this fork)
+
+### Fixes
+- **Log-timestamp double-conversion** — log record timestamps were pre-scaled to nanoseconds before being handed to the OTel SDK, which then converted them a second time, landing ~57 million years in the future and getting silently dropped by timestamp-validating backends (e.g. Loki).
+- **`openclaw completion` / `doctor` / `update` hang** — the plugin's plugin-management CLI guard didn't recognize the `completion --write-state` one-shot command, so it started full telemetry export during what should be a fire-and-forget CLI introspection step, and the process never exited.
+- **OpenClaw 9.7 unhandled-rejection crash loop** — mitigated (not resolved; root cause is an OpenClaw core regression, tracked as ISI-9700). See "This fork" above.
 
 ## What's New in 0.8.0
 

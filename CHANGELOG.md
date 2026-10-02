@@ -4,6 +4,20 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2](https://github.com/th-m-vogel/openclaw-observability-plugin/compare/v0.9.1...v0.9.2) (2026-10-02)
+
+Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`) — upstream has had no maintainer activity since 2026-07-20.
+
+### Bug Fixes
+
+* **otel-logs:** stop double-converting log record timestamps to nanoseconds — fixes log records landing ~57 million years in the future and being silently dropped by timestamp-validating backends
+* recognize `openclaw completion --write-state` as plugin-mgmt context — fixes `openclaw completion`/`doctor`/`update` hanging indefinitely
+* guard against undefined unhandled rejections crashing the gateway on OpenClaw 9.7 (ISI-9700) — mitigation; root cause is an OpenClaw core regression and remains open upstream
+
+### Dependencies
+
+* bump `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-node` to `2.11.0` (upstream PR #71)
+
 ## [0.9.1](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.9.0...v0.9.1) (2026-07-20)
 
 
