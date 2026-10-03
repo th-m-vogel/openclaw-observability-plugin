@@ -274,6 +274,34 @@ const otelObservabilityPlugin = {
         }
       }
 
+      // TEMPORARY diagnostic — not for merge. Opt-in (OTEL_DEBUG_HOOK_TRACE=1)
+      // logger of every api.on() dispatch, to find out whether OpenClaw core
+      // calls our hooks at all for sessions where a channel/topic overrides
+      // the default model. Strip this block out once the investigation is done.
+      if (process.env.OTEL_DEBUG_HOOK_TRACE === "1" && typeof api.on === "function") {
+        const originalOn = api.on.bind(api);
+        api.on = (event: string, handler: (...args: any[]) => any) => {
+          return originalOn(event, async (...args: any[]) => {
+            try {
+              const [evt, ctx] = args;
+              const sessionKey =
+                evt?.sessionKey ?? evt?.sessionId ?? ctx?.sessionKey ?? ctx?.session?.id;
+              const model =
+                evt?.model ?? evt?.response?.model ?? ctx?.model ?? ctx?.session?.model;
+              const provider = evt?.provider ?? ctx?.provider;
+              const channel = evt?.channel ?? evt?.channelId ?? ctx?.channel ?? ctx?.channelId;
+              logger.info(
+                `[otel-debug-hook-trace] ${event} session=${sessionKey} model=${model} ` +
+                `provider=${provider} channel=${JSON.stringify(channel)}`
+              );
+            } catch (err) {
+              logger.warn(`[otel-debug-hook-trace] ${event} logging failed: ${String(err)}`);
+            }
+            return handler(...args);
+          });
+        };
+      }
+
       // ISI-1710: only register hooks in non-plugin-mgmt contexts.
       // Hooks are snapshotted by OpenClaw at registration time; skipping
       // them here means the gateway (which does not use plugin-mgmt CLI)
