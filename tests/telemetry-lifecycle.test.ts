@@ -3,6 +3,23 @@ import { trace, type TracerProvider } from "@opentelemetry/api";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { MeterProvider } from "@opentelemetry/sdk-metrics";
 
+// Wrap (not replace) the real exporter constructors so BatchSpanProcessor /
+// PeriodicExportingMetricReader still get a genuine, functioning exporter —
+// existing lifecycle tests that flush/shutdown real providers are
+// unaffected — while letting header-wiring tests assert exactly what each
+// exporter was constructed with (endpoint construction alone can't catch a
+// traces/metrics header swap; only inspecting the actual constructor call can).
+vi.mock("@opentelemetry/exporter-trace-otlp-http", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opentelemetry/exporter-trace-otlp-http")>();
+  return { ...actual, OTLPTraceExporter: vi.fn((opts: any) => new actual.OTLPTraceExporter(opts)) };
+});
+vi.mock("@opentelemetry/exporter-metrics-otlp-http", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opentelemetry/exporter-metrics-otlp-http")>();
+  return { ...actual, OTLPMetricExporter: vi.fn((opts: any) => new actual.OTLPMetricExporter(opts)) };
+});
+
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { CONTENT_POLICY_DISABLED, type OtelObservabilityConfig } from "../src/config.js";
 import { PRELOADED_OTEL_SDK_ENV, initTelemetry, type TelemetryRuntime } from "../src/telemetry.js";
 
@@ -176,5 +193,110 @@ describe("telemetry runtime lifecycle", () => {
     await runtime.flush();
 
     expect(unrelatedForceFlush).not.toHaveBeenCalled();
+  });
+
+  it("uses a per-signal traces endpoint override verbatim (no /v1/traces suffix appended), leaving metrics on the shared (suffixed) endpoint", async () => {
+    // Real IONOS ingestion shapes differ per signal in ways a fixed
+    // "append /v1/<signal>" rule can't express (traces wants no /otlp
+    // prefix at all; logs wants an arbitrary /<tag> path, never /v1/logs).
+    // Per-signal overrides must therefore be used as-is, mirroring the
+    // OTel spec's OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT semantics (used
+    // verbatim) as opposed to the base OTEL_EXPORTER_OTLP_ENDPOINT
+    // (suffixed). Only the shared `endpoint` still gets suffixed.
+    const logger = makeLoggerSpy();
+    track(
+      initTelemetry(
+        baseConfig({
+          traces: true,
+          metrics: true,
+          signalEndpoints: { traces: "http://127.0.0.1:14319/v1/traces" },
+        }),
+        logger,
+      ),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[otel] Trace exporter → http://127.0.0.1:14319/v1/traces (http)",
+      ),
+    );
+    expect(logger.info).not.toHaveBeenCalledWith(
+      expect.stringContaining("/v1/traces/v1/traces"),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[otel] Metrics exporter → http://127.0.0.1:14318/v1/metrics",
+      ),
+    );
+  });
+
+  it("uses a per-signal metrics endpoint override verbatim, matching IONOS's own full-path pipeline URLs", async () => {
+    const logger = makeLoggerSpy();
+    track(
+      initTelemetry(
+        baseConfig({
+          metrics: true,
+          traces: false,
+          signalEndpoints: {
+            metrics: "http://127.0.0.1:14318/otlp/v1/metrics",
+          },
+        }),
+        logger,
+      ),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[otel] Metrics exporter → http://127.0.0.1:14318/otlp/v1/metrics (http",
+      ),
+    );
+  });
+
+  it("passes each signal's own headers to its own exporter — not swapped, not the shared headers", async () => {
+    // Endpoint-string assertions alone can't catch a traces/metrics
+    // header swap in telemetry.ts; only inspecting what each exporter
+    // constructor actually received can.
+    track(
+      initTelemetry(
+        baseConfig({
+          traces: true,
+          metrics: true,
+          headers: { Authorization: "Bearer shared" },
+          signalEndpoints: { traces: "http://127.0.0.1:14319/v1/traces" },
+          signalHeaders: { traces: { APIKEY: "traces-only-key" } },
+        }),
+        makeLoggerSpy(),
+      ),
+    );
+    expect(OTLPTraceExporter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "http://127.0.0.1:14319/v1/traces",
+        headers: { APIKEY: "traces-only-key" },
+      }),
+    );
+    expect(OTLPMetricExporter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "http://127.0.0.1:14318/v1/metrics",
+        headers: { Authorization: "Bearer shared" },
+      }),
+    );
+  });
+
+  it("uses the per-signal endpoint as-is (no /v1/... suffix) under grpc protocol", async () => {
+    const logger = makeLoggerSpy();
+    track(
+      initTelemetry(
+        baseConfig({
+          protocol: "grpc",
+          traces: true,
+          metrics: false,
+          signalEndpoints: { traces: "http://127.0.0.1:24317" },
+        }),
+        logger,
+      ),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[otel] Trace exporter → http://127.0.0.1:24317 (grpc)",
+      ),
+    );
   });
 });

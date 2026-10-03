@@ -9,7 +9,7 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import { context } from "@opentelemetry/api";
 
-import type { OtelObservabilityConfig } from "./config.js";
+import { resolveSignalConfig, type OtelObservabilityConfig } from "./config.js";
 import type { TelemetryRuntime } from "./telemetry.js";
 import {
   CODE_FILE_PATH,
@@ -278,15 +278,16 @@ export function initLogPipeline(
 
   const logConfig = parseLogConfig(config.logConfig);
 
+  const logsSignal = resolveSignalConfig(config, "logs");
   const logEndpoint =
-    config.protocol === "http"
-      ? `${config.endpoint}/v1/logs`
-      : config.endpoint;
+    config.protocol === "http" && !logsSignal.isOverride
+      ? `${logsSignal.endpoint}/v1/logs`
+      : logsSignal.endpoint;
 
   const logExporter =
     config.protocol === "grpc"
-      ? new OTLPLogExporterGRPC({ url: logEndpoint, headers: config.headers })
-      : new OTLPLogExporterHTTP({ url: logEndpoint, headers: config.headers });
+      ? new OTLPLogExporterGRPC({ url: logEndpoint, headers: logsSignal.headers })
+      : new OTLPLogExporterHTTP({ url: logEndpoint, headers: logsSignal.headers });
 
   // ISI-995: mirror the trace/metric Resource — real plugin version from
   // openclaw.plugin.json (not the legacy "0.1.0" placeholder) and an

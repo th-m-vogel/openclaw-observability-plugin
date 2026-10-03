@@ -49,6 +49,8 @@ Plugin entry configuration.
 | `captureContent` | boolean \| object | `false` | Span content capture policy |
 | `resourceAttributes` | object | `{}` | Extra OpenTelemetry resource attributes |
 | `logConfig` | object | — | Log filtering and exclusion rules |
+| `signalEndpoints` | object | — | Per-signal OTLP endpoint overrides (`metrics`/`logs`/`traces`); falls back to `endpoint` |
+| `signalHeaders` | object | — | Per-signal header overrides (`metrics`/`logs`/`traces`); replaces `headers` entirely for that signal |
 
 ## Endpoint Configuration
 
@@ -95,6 +97,61 @@ For OTLP/gRPC endpoints (port 4317):
 ```
 
 **Note**: gRPC support is experimental.
+
+## Per-Signal Endpoints (multi-backend fan-out)
+
+For backends that expose a **separate ingestion URL per signal** instead of one shared OTLP endpoint (e.g. IONOS Cloud Observability: Mimir for metrics, Loki for logs, Tempo for traces), set `signalEndpoints` (and optionally `signalHeaders`) alongside the existing `endpoint`/`headers`. Any signal not listed falls back to the shared `endpoint`/`headers` — this is fully backward compatible with existing configs.
+
+**Per-signal endpoints are used verbatim — no `/v1/<signal>` suffix is appended**, unlike the shared `endpoint` (which still gets suffixed for HTTP). This mirrors the OTel spec's distinction between the base `OTEL_EXPORTER_OTLP_ENDPOINT` (suffixed) and the signal-specific `OTEL_EXPORTER_OTLP_{TRACES,METRICS,LOGS}_ENDPOINT` variables (used as-is). It's also required to express real per-signal backend shapes that don't follow a fixed suffix rule — e.g. IONOS's own three pipelines each want a differently-shaped complete URL:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "config": {
+          "protocol": "http",
+          "signalEndpoints": {
+            "metrics": "https://<pipeline-id>-metrics.<tenant>.monitoring.<region>.ionos.com/otlp/v1/metrics",
+            "traces": "https://<pipeline-id>-traces.<tenant>.tracing.<region>.ionos.com/v1/traces",
+            "logs": "https://<pipeline-id>-logs.<tenant>.logging.<region>.ionos.com/<tag>"
+          },
+          "signalHeaders": {
+            "metrics": { "APIKEY": "<metrics-pipeline-key>" },
+            "traces": { "APIKEY": "<traces-pipeline-key>" },
+            "logs": { "APIKEY": "<logs-pipeline-key>" }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Note IONOS's traces endpoint has **no** `/otlp` prefix (unlike metrics), and logs ends in the pipeline's own `/<tag>` path rather than `/v1/logs` — since overrides are verbatim, both are expressible even though they don't follow the same shape as each other or as the shared `endpoint`'s suffix rule.
+
+`signalHeaders` **replaces** `headers` entirely for that signal (it is not merged) — set the full header set for that signal's backend, including any shared headers you still need.
+
+If only some signals need their own endpoint, list only those — the rest keep using the shared `endpoint`/`headers`:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "config": {
+          "endpoint": "http://localhost:4318",
+          "signalEndpoints": {
+            "logs": "https://logs-only-backend.example.com/otlp"
+          }
+        }
+      }
+    }
+  }
+}
+```
 
 ## Authentication
 
@@ -349,6 +406,8 @@ Because the runtime is reused, changes to telemetry-affecting fields do not take
 - `sampleRate`
 - `metricsIntervalMs`
 - `resourceAttributes`
+- `signalEndpoints`
+- `signalHeaders`
 - preload-backed content capture (`captureContent` for Traceloop LLM-client spans)
 
 This is intentional: stale telemetry config is preferable to dropping all post-reload spans. Restart the gateway after changing any of those fields. The log pipeline is rebuilt during service `stop()`/`register()` reloads, so `logs` and `logConfig` can take effect through the plugin reload path.

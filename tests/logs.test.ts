@@ -9,6 +9,18 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+// Wrap (not replace) the real exporter constructor so the log pipeline's
+// BatchLogRecordProcessor still gets a genuine, functioning exporter —
+// existing tests are unaffected — while letting header-wiring tests assert
+// exactly what the exporter was constructed with (the endpoint string alone
+// doesn't prove `signalHeaders.logs` was actually threaded through, only
+// that `config.headers` wasn't silently used instead).
+vi.mock("@opentelemetry/exporter-logs-otlp-http", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opentelemetry/exporter-logs-otlp-http")>();
+  return { ...actual, OTLPLogExporter: vi.fn((opts: any) => new actual.OTLPLogExporter(opts)) };
+});
+
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import {
   bridgeGatewayLogger,
   buildLogAttributes,
@@ -606,5 +618,53 @@ describe("buildLogAttributes (ISI-995 log-attribute dedup)", () => {
     // toAnyValue redacts strings, so the secret-shaped value should not
     // round-trip in cleartext through the extras bucket.
     expect(attrs["openclaw.log.extra.apiKey"]).toBe("[REDACTED_API_KEY]");
+  });
+});
+
+describe("log pipeline — per-signal endpoint override (FR #72)", () => {
+  it("uses the per-signal logs endpoint verbatim (no /v1/logs suffix appended), independent of the shared endpoint", () => {
+    // IONOS's own Logging Service ingestion URL is a complete path ending
+    // in the pipeline's tag (`https://<host>/<tag>`) — it never accepts a
+    // `/v1/logs` suffix. A per-signal override must be used as-is so this
+    // shape (and any other backend with its own complete-URL contract) is
+    // actually expressible; only the shared `endpoint` still gets suffixed.
+    const config = createConfig({
+      signalEndpoints: { logs: "http://127.0.0.1:14320/openclaw" },
+      signalHeaders: { logs: { APIKEY: "logs-only-key" } },
+    });
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const pipeline = initLogPipeline(config, logger);
+    expect(pipeline).not.toBeNull();
+    expect(logger.info).toHaveBeenCalledWith(
+      "[otel-logs] Log exporter → http://127.0.0.1:14320/openclaw (http)",
+    );
+    void pipeline?.shutdown();
+  });
+
+  it("passes signalHeaders.logs to the log exporter, not the shared headers", () => {
+    const config = createConfig({
+      headers: { Authorization: "Bearer shared" },
+      signalEndpoints: { logs: "http://127.0.0.1:14320/openclaw" },
+      signalHeaders: { logs: { APIKEY: "logs-only-key" } },
+    });
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const pipeline = initLogPipeline(config, logger);
+    expect(OTLPLogExporter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "http://127.0.0.1:14320/openclaw",
+        headers: { APIKEY: "logs-only-key" },
+      }),
+    );
+    void pipeline?.shutdown();
+  });
+
+  it("falls back to the shared endpoint when no logs override is set", () => {
+    const config = createConfig();
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const pipeline = initLogPipeline(config, logger);
+    expect(logger.info).toHaveBeenCalledWith(
+      "[otel-logs] Log exporter → http://localhost:4318/v1/logs (http)",
+    );
+    void pipeline?.shutdown();
   });
 });
