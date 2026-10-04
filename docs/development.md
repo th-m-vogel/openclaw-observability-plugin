@@ -6,7 +6,7 @@ How to develop, test, and contribute to the plugin.
 
 ```bash
 # Clone
-git clone https://github.com/henrikrexed/openclaw-observability-plugin.git
+git clone https://github.com/th-m-vogel/openclaw-observability-plugin.git
 cd openclaw-observability-plugin
 
 # Install dependencies
@@ -161,23 +161,17 @@ mkdocs build
 mkdocs gh-deploy
 ```
 
-## Publishing to npm
+## Cutting a release
 
-When ready to publish as an installable OpenClaw plugin:
-
-```bash
-# Update version in package.json and openclaw.plugin.json
-npm version patch
-
-# Publish
-npm publish --access public
-```
-
-Users can then install with:
+This fork is **not published to npm** (see [README → Installation](../README.md#installation)). To cut a release:
 
 ```bash
-openclaw plugins install @openclaw/otel-observability
+# Bump version in package.json and openclaw.plugin.json
+# Add a section to CHANGELOG.md
+git tag v0.X.0 && git push origin v0.X.0
 ```
+
+Users install by cloning the repo at that tag and loading it by path — see [README → Installation](../README.md#installation) for the full steps.
 
 ## Contributing
 

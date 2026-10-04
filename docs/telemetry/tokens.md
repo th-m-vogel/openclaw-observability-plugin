@@ -97,7 +97,9 @@ total:        998,598 tokens
 
 ## Cost Calculation
 
-### Current Anthropic API Pricing (2026)
+### Illustrative Anthropic API Pricing
+
+> The table below is a worked example to show how the cost calculation works, not a live price list — Anthropic's model lineup and rates change over time (the models actually seen in production telemetry for this plugin are the current Claude generation, e.g. `claude-sonnet-5`, not the `4.5`-era names below). Check [Anthropic's current pricing](https://www.anthropic.com/pricing) for the rates that apply to whatever model you're actually running.
 
 | Model | Input | Output | Cache Read | Cache Write |
 |-------|-------|--------|------------|-------------|
@@ -169,15 +171,15 @@ Adding `cache_read.input_tokens` + `cache_creation.input_tokens` + `input_tokens
 
 ```promql
 # Total token cost over time
-sum(rate(openclaw_tokens_total[5m])) by (model)
+sum(rate(openclaw_llm_tokens_total[5m])) by (gen_ai_response_model)
 
-# Cache hit ratio
-sum(openclaw_tokens{type="cache_read"}) / 
-sum(openclaw_tokens{type=~"cache_read|input"})
+# Cache hit ratio (from the gen_ai.client.token.usage histogram)
+sum(rate(gen_ai_client_token_usage_sum{gen_ai_token_type="cache_read"}[5m])) /
+sum(rate(gen_ai_client_token_usage_sum{gen_ai_token_type=~"cache_read|input"}[5m]))
 
 # Output to input ratio (efficiency)
-sum(openclaw_tokens{type="output"}) /
-sum(openclaw_tokens{type="input"})
+sum(rate(gen_ai_client_token_usage_sum{gen_ai_token_type="output"}[5m])) /
+sum(rate(gen_ai_client_token_usage_sum{gen_ai_token_type="input"}[5m]))
 ```
 
 ### Alerting Thresholds

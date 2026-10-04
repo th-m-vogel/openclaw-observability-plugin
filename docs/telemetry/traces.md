@@ -98,10 +98,10 @@ Created by the `tool_result_persist` hook. Child of the agent turn span.
 
 | Field | Value |
 |-------|-------|
-| **Span Name** | `tool.<tool_name>` |
+| **Span Name** | `execute_tool <tool_name>` |
 | **Kind** | `INTERNAL` |
 
-**Examples:** `tool.exec`, `tool.web_fetch`, `tool.browser`, `tool.Read`, `tool.Write`, `tool.memory_search`, `tool.Edit`
+**Examples:** `execute_tool exec`, `execute_tool web_fetch`, `execute_tool browser`, `execute_tool Read`, `execute_tool Write`, `execute_tool memory_search`, `execute_tool Edit`
 
 **Attributes:**
 
@@ -113,9 +113,6 @@ Created by the `tool_result_persist` hook. Child of the agent turn span.
 | `openclaw.tool.result_chars` | int | Total characters in result |
 | `openclaw.tool.result_parts` | int | Number of content parts in result |
 | `openclaw.tool.error_preview` | string | **Failure paths only.** Bounded, redacted preview of the tool error text. Gated by `captureContent.toolErrorMessages`; redacted before truncation (1024 chars) |
-| `openclaw.tool.kind` | string | Tool provider classification (e.g. `builtin` vs `mcp`), from `before_tool_call`. *Unreleased — see note below.* |
-| `openclaw.tool.input_kind` | string | Shape of the tool input (e.g. `command`, `file`, `query`), from `before_tool_call`. *Unreleased.* |
-| `openclaw.tool.derived_paths` | string[] | Filesystem paths the call will touch (file blast-radius). Capped at 50 entries / 512 chars each; each entry redacted before truncation. *Unreleased.* |
 | `openclaw.session.key` | string | Session identifier |
 | `openclaw.agent.id` | string | Agent identifier |
 | `gen_ai.tool.name` | string | Tool name (GenAI semconv) |
@@ -128,13 +125,6 @@ Created by the `tool_result_persist` hook. Child of the agent turn span.
 > as an object — error text is operational data, a different privacy class
 > from prompt/response bodies. See
 > [Configuration → `captureContent`](../configuration.md#capturecontent-gateway-launch-setting).
-
-> **Unreleased (ISI-1629):** the tool-span enrichment keys
-> `openclaw.tool.kind`, `openclaw.tool.input_kind`, and
-> `openclaw.tool.derived_paths` are on a feature branch, **not yet merged to
-> `main`** or in a tagged release. They are read from the already-subscribed
-> `before_tool_call` hook — additive only, no `minOpenClawVersion` bump. This
-> reference will move them into the released set once the change lands.
 
 **Status:** `OK` on success, `ERROR` if the tool returned an error.
 
@@ -212,7 +202,7 @@ The plugin maintains a `sessionContextMap` keyed by `sessionKey`:
 4. `tool_result_persist` creates tool spans as children of the agent turn
 5. `agent_end` ends the agent turn and root spans, cleans up the context
 
-Stale contexts (no `agent_end` within 5 minutes) are automatically cleaned up.
+Stale contexts (no `agent_end` within 30 minutes) are automatically cleaned up (checked every 60s).
 
 ## Example DQL Queries (Dynatrace)
 
@@ -233,7 +223,7 @@ fetch spans, samplingRatio:1
 
 ```sql
 fetch spans, samplingRatio:1
-| filter startsWith(span.name, "tool.")
+| filter startsWith(span.name, "execute_tool ")
 | fields start_time, span.name, duration, openclaw.tool.result_chars
 | sort start_time desc
 | limit 50
