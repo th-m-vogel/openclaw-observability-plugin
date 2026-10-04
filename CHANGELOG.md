@@ -4,6 +4,24 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0](https://github.com/th-m-vogel/openclaw-observability-plugin/compare/v0.9.2...v0.10.0) (2026-10-04)
+
+Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`).
+
+### Features
+
+* **config:** native per-signal OTLP endpoint/header overrides — `signalEndpoints` / `signalHeaders` (implements upstream [FR #72](https://github.com/henrikrexed/openclaw-observability-plugin/issues/72)). Lets traces, metrics, and logs ship to different ingestion URLs/credentials in one config block (e.g. a backend that exposes separate endpoints per signal, like IONOS Cloud Observability), without a local proxy in front of the plugin. Per-signal overrides are used **verbatim** — no `/v1/<signal>` suffix is appended, unlike the shared `endpoint`. Fully backward compatible: existing configs using only `endpoint`/`headers` are unaffected, every signal falls back to them unless explicitly overridden.
+* **otel-register:** tear down a previous `register()` call's hooks/diagnostics-listener/log-pipeline before setting up a new one if `register()` runs again without a preceding `stop()` — fixes duplicate `model.usage` cost/token counting observed in production when the gateway re-registers the plugin without an intervening stop.
+
+### Bug Fixes
+
+* **config:** per-signal OTLP endpoint overrides are now applied verbatim, matching the OTel spec's `OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT` semantics (no suffix), instead of incorrectly appending `/v1/<signal>` the same way the shared `endpoint` does
+
+### Documentation
+
+* document the Loki `service_name=unknown_service` label gap as a backend limitation, not a plugin bug
+* document `gen_ai_provider_name` inconsistency as a likely OpenClaw-core-side issue (tracked upstream)
+
 ## [0.9.2](https://github.com/th-m-vogel/openclaw-observability-plugin/compare/v0.9.1...v0.9.2) (2026-10-02)
 
 Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`) — upstream has had no maintainer activity since 2026-07-20.
@@ -41,19 +59,7 @@ Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`) — upstrea
 ### Bug Fixes
 
 * **hooks:** move DIAG agent-turn verbose context dump from info to debug level ([30e8fa7](https://github.com/henrikrexed/openclaw-observability-plugin/commit/30e8fa752e8016a3aa78bcee451bc6b3e966e837))
-* **ISI-1653:** re-parent lifecycle spans into the request/session trace ([#67](https://github.com/henrikrexed/openclaw-observability-plugin/issues/67)) ([e4c1245](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e4c12458f6a7ace0c1696cea4e4b7023974cfe64))
-
-## [Unreleased]
-
-Merged in code review but not yet in a tagged release. Additive — no keys removed or renamed. The plugin-domain attribute schema (`openclaw.schema.version`) advances to `1.5.0`.
-
-### Features
-
-* **ISI-1629:** tool-span enrichment — `openclaw.tool.kind`, `openclaw.tool.input_kind`, and bounded/redacted `openclaw.tool.derived_paths`, read from the already-subscribed `before_tool_call` hook (tool attribution + file blast-radius analysis)
-
-### Bug Fixes
-
-* **ISI-1653:** lifecycle event spans (`openclaw.message.sent`, `openclaw.cron.changed`, `openclaw.dispatch.prepare`) no longer orphan into their own single-span traces. A shared `resolveLifecycleParentContext` walks all store tiers (active → legacy → retained-recent-request → session → gateway) so these spans nest into the request/session trace they belong to, collapsing the previous "1 request → 3-4 traces" fan-out into one trace. A trailing `message_sent` that fires *after* `agent_end` tears down the live context now re-attaches via a bounded, TTL'd (60s) retained request context. The resolved anchor is stamped on each span as `openclaw.trace.parent_source` for diagnosability.
+* **ISI-1653:** lifecycle event spans (`openclaw.message.sent`, `openclaw.cron.changed`, `openclaw.dispatch.prepare`) no longer orphan into their own single-span traces ([#67](https://github.com/henrikrexed/openclaw-observability-plugin/issues/67)) ([e4c1245](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e4c12458f6a7ace0c1696cea4e4b7023974cfe64)). A shared `resolveLifecycleParentContext` walks all store tiers (active → legacy → retained-recent-request → session → gateway) so these spans nest into the request/session trace they belong to, collapsing the previous "1 request → 3-4 traces" fan-out into one trace. A trailing `message_sent` that fires *after* `agent_end` tears down the live context now re-attaches via a bounded, TTL'd (60s) retained request context. The resolved anchor is stamped on each span as `openclaw.trace.parent_source` for diagnosability.
 
 ## [0.8.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.7.0...v0.8.0) (2026-07-08)
 

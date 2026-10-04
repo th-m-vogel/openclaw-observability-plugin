@@ -1,17 +1,21 @@
 # OpenClaw Observability
 
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://henrikrexed.github.io/openclaw-observability-plugin/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 OpenTelemetry observability for [OpenClaw](https://github.com/openclaw/openclaw) AI agents.
 
-📖 **[Full Documentation](https://henrikrexed.github.io/openclaw-observability-plugin/)** — Setup guides, configuration reference, and backend examples.
+📖 **[Full Documentation](./docs/index.md)** — Setup guides, configuration reference, and backend examples.
 
 ## This fork
 
 `th-m-vogel/openclaw-observability-plugin` is a maintained fork of the upstream project above. Upstream (`henrikrexed/openclaw-observability-plugin`) has had no maintainer activity since 2026-07-20 — including no response to unrelated contributors' trivial, uncontroversial PRs — so this fork treats itself as the canonical, actively maintained version rather than waiting on upstream merges.
 
-**Current release: `0.9.2`**, running in production against a live OpenClaw gateway. Changes since `0.9.1`:
+**Current release: `0.10.0`**, running in production against a live OpenClaw gateway. Changes since `0.9.2`:
+
+- **Native per-signal OTLP endpoints** — traces, metrics, and logs can now ship to different endpoints/headers in one config block (`signalEndpoints`/`signalHeaders`), for backends that expose separate ingestion URLs per signal (e.g. IONOS Cloud Observability). Implements upstream [FR #72](https://github.com/henrikrexed/openclaw-observability-plugin/issues/72). **Fully backward compatible** — existing configs that only set `endpoint`/`headers` are unaffected; every signal falls back to those unless a per-signal override is explicitly set.
+- **Fixed a duplicate cost/token-counting bug** — if the gateway called `register()` again without a preceding `stop()`, the previous registration's hooks and diagnostics listener stayed live alongside the new one, so a single real `model.usage` event got counted twice (confirmed via direct log evidence). Fixed by tearing down the previous registration's resources before setting up the new one.
+
+Changes in `0.9.2`:
 
 - **Fixed a log-timestamp corruption bug** — exported log records had their timestamp double-converted to nanoseconds, landing roughly 57 million years in the future. Backends that validate timestamp plausibility (e.g. Grafana Loki) silently dropped every record, with no error surfaced anywhere in the pipeline. Confirmed fixed.
 - **Fixed `openclaw completion` / `doctor` / `update` hanging indefinitely** — the plugin didn't recognize these as one-shot CLI commands (including the post-update completion-cache refresh `openclaw update` runs automatically) and started full telemetry export instead, so the process never exited. Confirmed fixed.
@@ -31,9 +35,21 @@ The plugin follows a two-track support model. Pick the plugin track that matches
 | `0.6.x`      | `>= 2026.5.13`    | `main`           | Superseded by 0.7.x / 0.8.x                              | Replaced by 0.8.x                             |
 | `0.7.x`      | `>= 2026.5.13`    | `main`           | Superseded by 0.8.x                                     | Replaced by 0.8.x                             |
 | `0.8.x`      | `>= 2026.5.13`    | `main`           | Superseded by 0.9.x                                      | Replaced by 0.9.x                              |
-| `0.9.x`      | `>= 2026.4.21`    | `main`           | **Active (this fork)** — log-timestamp fix, completion/doctor/update hang fix, OpenClaw 9.7 crash-loop mitigation (**9.7 support ongoing** — mitigation in place, root cause still open in OpenClaw core) | Latest release                                 |
+| `0.9.x`      | `>= 2026.4.21`    | `main`           | Superseded by 0.10.x                                      | Replaced by 0.10.x                             |
+| `0.10.x`     | `>= 2026.4.21`    | `main`           | **Active (this fork)** — native per-signal OTLP endpoints, duplicate cost/token-counting fix, log-timestamp fix, completion/doctor/update hang fix, OpenClaw 9.7 crash-loop mitigation (**9.7 support ongoing** — mitigation in place, root cause still open in OpenClaw core) | Latest release                                 |
 
 > OpenClaw `2026.4.21` introduced the `before_model_resolve` and `before_prompt_build` hooks and deprecated `before_agent_start`. The `0.2.x` line targets the new hooks; the `0.1.x` line remains on the legacy hook for existing deployments.
+
+## What's New in 0.10.0
+
+**Released:** 2026-10-04 (this fork)
+
+### Features
+- **Native per-signal OTLP endpoints** *(`signalEndpoints`/`signalHeaders`, implements upstream [FR #72](https://github.com/henrikrexed/openclaw-observability-plugin/issues/72))* — traces, metrics, and logs can each ship to a different OTLP endpoint and header set, for backends that expose separate ingestion URLs per signal instead of one shared OTLP collector. Per-signal overrides are used **verbatim** (no `/v1/<signal>` suffix appended), matching the OTel spec's `OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT` semantics — distinct from the shared `endpoint`, which still gets the suffix appended for HTTP. See [Configuration → Per-Signal Endpoints](./docs/configuration.md#configuration-reference).
+- **Backward compatible** — this is purely additive. Configs using only the existing `endpoint`/`headers`/`protocol` keys behave exactly as before; `signalEndpoints`/`signalHeaders` are optional overrides that fall back to `endpoint`/`headers` for any signal left unset.
+
+### Fixes
+- **Duplicate `model.usage` cost/token counting** — if OpenClaw called the plugin's `register()` again without an intervening `stop()`, the previous registration's hooks and diagnostics listener were never torn down, so a single real `model.usage` event could be counted by both the old and new listener. Fixed by tearing down the previous registration's hooks/diagnostics-listener/log-pipeline before setting up the new one, mirroring the same singleton-guard pattern already used for the TracerProvider/MeterProvider.
 
 ## What's New in 0.9.2
 
@@ -49,7 +65,7 @@ The plugin follows a two-track support model. Pick the plugin track that matches
 **Released:** 2026-07-08
 
 ### Features
-- **GenAI content keys for Dynatrace AI Observability** *(ISI-1605, schema 1.4.0)* — Emits the stable OTel GenAI content keys (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, `gen_ai.prompt.prompt_filter_results`, `gen_ai.completion.content_filter_results`) **alongside** the existing `openclaw.content.*` mirrors, sharing the same policy gate and redaction funnel. Adds the `traceloop.span.kind` classifier (`task` on agent-turn spans, `tool` on tool spans) for agent-vs-tool attribution. All content keys are **opt-in** and default **off** — they carry prompt/response bodies (PII). See [Dynatrace → AI Observability](https://henrikrexed.github.io/openclaw-observability-plugin/backends/dynatrace/#ai-observability-gen_ai-content-keys) and [Privacy](https://henrikrexed.github.io/openclaw-observability-plugin/security/privacy/).
+- **GenAI content keys for Dynatrace AI Observability** *(ISI-1605, schema 1.4.0)* — Emits the stable OTel GenAI content keys (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, `gen_ai.prompt.prompt_filter_results`, `gen_ai.completion.content_filter_results`) **alongside** the existing `openclaw.content.*` mirrors, sharing the same policy gate and redaction funnel. Adds the `traceloop.span.kind` classifier (`task` on agent-turn spans, `tool` on tool spans) for agent-vs-tool attribution. All content keys are **opt-in** and default **off** — they carry prompt/response bodies (PII). See [Dynatrace → AI Observability](./docs/backends/dynatrace.md#ai-observability-gen_ai-content-keys) and [Privacy](./docs/security/privacy.md).
 - **Compaction spans & metrics** *(ISI-1628)* — `openclaw.compaction` span plus counter/histogram around `before_compaction` / `after_compaction`.
 - **Subagent trace propagation** *(ISI-1627)* — `subagent_spawned` migration with end-to-end trace propagation into child sessions.
 
@@ -58,17 +74,7 @@ The plugin follows a two-track support model. Pick the plugin track that matches
 **Released:** 2026-06-17
 
 ### Features
-- **Bounded, redacted tool-error previews** *(ISI-1318)* — Failed tool calls now stamp a redacted, length-capped `openclaw.tool.error_preview` on the tool span so you can triage failures without opening the raw payload. Text is **redacted first, then truncated** to 1024 chars (so a secret straddling the cut can't leak). Gated by the new `captureContent.toolErrorMessages` flag — the one content flag that defaults **on** when `captureContent` is supplied as an object, because error text is operational data, a different privacy class from prompt/response bodies. See [Configuration → `captureContent`](https://henrikrexed.github.io/openclaw-observability-plugin/configuration/#capturecontent-gateway-launch-setting).
-
-## Unreleased (on `main`'s feature branch)
-
-Merged in code review but **not yet in a tagged release**. All changes are **additive** — no keys removed or renamed.
-
-### Tool-span enrichment *(ISI-1629, schema 1.5.0)*
-- Three new tool-span attributes read from the already-subscribed `before_tool_call` hook (no `minOpenClawVersion` bump):
-  - `openclaw.tool.kind` — tool-provider classification (e.g. `builtin`, `mcp`) for tool attribution.
-  - `openclaw.tool.input_kind` — the shape of the tool input (e.g. `command`, `file`, `query`).
-  - `openclaw.tool.derived_paths` — bounded, redacted array of filesystem paths the call will touch, for file blast-radius analysis (capped at 50 entries / 512 chars each; each entry redacted before truncation).
+- **Bounded, redacted tool-error previews** *(ISI-1318)* — Failed tool calls now stamp a redacted, length-capped `openclaw.tool.error_preview` on the tool span so you can triage failures without opening the raw payload. Text is **redacted first, then truncated** to 1024 chars (so a secret straddling the cut can't leak). Gated by the new `captureContent.toolErrorMessages` flag — the one content flag that defaults **on** when `captureContent` is supplied as an object, because error text is operational data, a different privacy class from prompt/response bodies. See [Configuration → `captureContent`](./docs/configuration.md#capturecontent-gateway-launch-setting).
 
 <details>
 <summary>What's New in 0.6.0 (2026-05-13)</summary>
@@ -218,62 +224,13 @@ For `--local` and other code paths that call `process.exit()` before the batch p
 
 ### Installation
 
-#### Option 1 — npm (recommended)
+> This fork is **not published to npm** — it's a GitHub-only distribution. Install by cloning the repository and loading it by path, pinned to a release tag.
 
-Install the plugin from npm. This is the path that the [openclaw-operator](https://github.com/henrikrexed/openclaw-operator) uses via `OpenClawInstance.spec.plugins`, and the recommended path for production.
-
-```bash
-npm install @henrikrexed/openclaw-otel-observability
-```
-
-Or install it directly through OpenClaw's plugin manager (pin the version to the current release):
-
-```bash
-openclaw plugins install --force npm:@henrikrexed/openclaw-otel-observability@0.9.1
-```
-
-Then add it to your `openclaw.json`:
-
-```json
-{
-  "plugins": {
-    "load": {
-      "paths": ["./node_modules/@henrikrexed/openclaw-otel-observability"]
-    },
-    "entries": {
-      "otel-observability": {
-        "enabled": true
-      }
-    }
-  }
-}
-```
-
-For the operator (Kubernetes), reference the package directly:
-
-```yaml
-apiVersion: openclaw.io/v1alpha1
-kind: OpenClawInstance
-spec:
-  plugins:
-    - name: "@henrikrexed/openclaw-otel-observability"
-      version: "^0.9.1"
-```
-
-Clear the jiti cache and restart the gateway:
-
-```bash
-rm -rf /tmp/jiti
-systemctl --user restart openclaw-gateway
-```
-
-#### Option 2 — Local development (clone)
-
-For contributing or running an unreleased build:
-
-1. Clone this repository:
+1. Clone this repository, pinned to the release tag you want:
    ```bash
-   git clone https://github.com/henrikrexed/openclaw-observability-plugin.git
+   git clone --branch v0.10.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git
+   cd openclaw-observability-plugin
+   npm ci && npm run build
    ```
 
 2. Add to your `openclaw.json` pointing at the clone path:
