@@ -2,7 +2,7 @@
   "id": "otel-observability",
   "name": "OpenTelemetry Observability",
   "description": "Traces, metrics, and logs for OpenClaw using OpenLLMetry and OpenTelemetry",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "minOpenClawVersion": "2026.4.21",
   "contracts": {
     "tools": [
@@ -59,6 +59,16 @@
     },
     "logConfig": {
       "label": "Log Pipeline Filters",
+      "advanced": true
+    },
+    "signalEndpoints": {
+      "label": "Per-Signal OTLP Endpoints",
+      "help": "Optional per-signal endpoint overrides for backends that expose separate ingestion URLs for metrics/logs/traces (e.g. IONOS Cloud Observability). Falls back to the shared `endpoint` for any signal left unset.",
+      "advanced": true
+    },
+    "signalHeaders": {
+      "label": "Per-Signal OTLP Headers",
+      "help": "Optional per-signal header overrides (e.g. a different APIKEY per signal's pipeline). Replaces `headers` entirely for that signal when set.",
       "advanced": true
     }
   },
@@ -157,6 +167,26 @@
         "type": "object",
         "additionalProperties": true,
         "description": "Optional log pipeline filtering configuration"
+      },
+      "signalEndpoints": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "metrics": { "type": "string" },
+          "logs": { "type": "string" },
+          "traces": { "type": "string" }
+        },
+        "description": "Optional per-signal OTLP endpoint overrides. Falls back to `endpoint` for any signal not listed."
+      },
+      "signalHeaders": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "metrics": { "type": "object", "additionalProperties": { "type": "string" } },
+          "logs": { "type": "object", "additionalProperties": { "type": "string" } },
+          "traces": { "type": "object", "additionalProperties": { "type": "string" } }
+        },
+        "description": "Optional per-signal header overrides. Replaces `headers` entirely for that signal when set."
       }
     }
   }

@@ -43,6 +43,10 @@ export interface ContentCapturePolicy {
 
 export type ContentCaptureInput = boolean | Partial<ContentCapturePolicy>;
 
+export type OtelSignal = "metrics" | "logs" | "traces";
+
+const SIGNALS: readonly OtelSignal[] = ["metrics", "logs", "traces"];
+
 export interface OtelObservabilityConfig {
   /** OTLP endpoint URL */
   endpoint: string;
@@ -86,6 +90,24 @@ export interface OtelObservabilityConfig {
   resourceAttributes: Record<string, string>;
   /** Optional log pipeline filtering configuration */
   logConfig?: Record<string, unknown>;
+  /**
+   * Optional per-signal endpoint override. When set for a signal, the
+   * override REPLACES `endpoint` for that signal's exporter only; signals
+   * without an override keep using the shared `endpoint`. Lets a single
+   * config point metrics/logs/traces at separate OTLP receiver URLs, for
+   * backends that expose one ingestion FQDN per signal (e.g. IONOS Cloud
+   * Observability: Mimir/metrics, Loki/logs, Tempo/traces) with no
+   * external fan-out proxy required.
+   */
+  signalEndpoints?: Partial<Record<OtelSignal, string>>;
+  /**
+   * Optional per-signal header override. When set for a signal, it
+   * REPLACES `headers` entirely for that signal (not merged) — mirrors
+   * `signalEndpoints`'s override semantics so a signal routed to a
+   * different backend can carry a completely different auth scheme
+   * (e.g. a different `APIKEY` per IONOS pipeline).
+   */
+  signalHeaders?: Partial<Record<OtelSignal, Record<string, string>>>;
 }
 
 export const CONTENT_POLICY_DISABLED: ContentCapturePolicy = Object.freeze({
@@ -218,6 +240,65 @@ function parseSampleRate(
   return undefined;
 }
 
+function parseSignalEndpoints(
+  obj: Record<string, unknown>,
+): Partial<Record<OtelSignal, string>> | undefined {
+  const raw = obj.signalEndpoints;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const input = raw as Record<string, unknown>;
+  const result: Partial<Record<OtelSignal, string>> = {};
+  for (const signal of SIGNALS) {
+    const value = input[signal];
+    if (typeof value === "string" && value.length > 0) {
+      result[signal] = value;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function parseSignalHeaders(
+  obj: Record<string, unknown>,
+): Partial<Record<OtelSignal, Record<string, string>>> | undefined {
+  const raw = obj.signalHeaders;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const input = raw as Record<string, unknown>;
+  const result: Partial<Record<OtelSignal, Record<string, string>>> = {};
+  for (const signal of SIGNALS) {
+    const value = input[signal];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      result[signal] = value as Record<string, string>;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+/**
+ * Resolve a signal's effective endpoint/headers: the per-signal override
+ * from `signalEndpoints`/`signalHeaders` if set, otherwise the shared
+ * `endpoint`/`headers`. Used by `telemetry.ts` (traces, metrics) and
+ * `logs.ts` (logs) so all three exporters share one resolution rule.
+ *
+ * `isOverride` tells the caller whether the returned `endpoint` came from
+ * a per-signal override (verbatim — use as-is, mirroring the OTel spec's
+ * `OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT` semantics) or the shared
+ * `endpoint` (still gets `/v1/<signal>` appended under HTTP, matching the
+ * base `OTEL_EXPORTER_OTLP_ENDPOINT` behavior). Real per-signal backends
+ * (e.g. IONOS: traces takes no `/otlp` prefix, logs is a complete
+ * `/<tag>` path with no `/v1/logs` suffix at all) can't be expressed if a
+ * fixed suffix is always appended, which is why overrides must be verbatim.
+ */
+export function resolveSignalConfig(
+  config: OtelObservabilityConfig,
+  signal: OtelSignal,
+): { endpoint: string; headers: Record<string, string>; isOverride: boolean } {
+  const override = config.signalEndpoints?.[signal];
+  return {
+    endpoint: override ?? config.endpoint,
+    headers: config.signalHeaders?.[signal] ?? config.headers,
+    isOverride: override !== undefined,
+  };
+}
+
 export function parseConfig(
   raw: unknown,
   logger?: ParseConfigLogger,
@@ -257,5 +338,7 @@ export function parseConfig(
       !Array.isArray(obj.logConfig)
         ? (obj.logConfig as Record<string, unknown>)
         : undefined,
+    signalEndpoints: parseSignalEndpoints(obj),
+    signalHeaders: parseSignalHeaders(obj),
   };
 }

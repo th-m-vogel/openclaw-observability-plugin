@@ -82,7 +82,7 @@ Latency distribution for LLM calls. Use percentiles (p50, p95, p99) to understan
 |---|---|
 | **Type** | Counter |
 | **Unit** | calls |
-| **Attributes** | `tool.name` |
+| **Attributes** | `gen_ai.tool.name` |
 | **Description** | Total tool invocations |
 
 Broken down by tool name. Shows which tools are used most frequently.
@@ -97,7 +97,7 @@ Broken down by tool name. Shows which tools are used most frequently.
 |---|---|
 | **Type** | Counter |
 | **Unit** | errors |
-| **Attributes** | `tool.name` |
+| **Attributes** | `gen_ai.tool.name` |
 | **Description** | Total tool execution errors |
 
 Broken down by tool name. High error rates on specific tools may indicate configuration issues or external service problems.
@@ -110,7 +110,7 @@ Broken down by tool name. High error rates on specific tools may indicate config
 |---|---|
 | **Type** | Histogram |
 | **Unit** | ms |
-| **Attributes** | `tool.name` |
+| **Attributes** | `gen_ai.tool.name` |
 | **Description** | Tool execution duration in milliseconds |
 
 How long each tool takes. Useful for identifying slow tools that bottleneck agent turns.
@@ -135,10 +135,10 @@ End-to-end time for a complete agent turn. This is the user-perceived latency.
 |---|---|
 | **Type** | Counter |
 | **Unit** | resets |
-| **Attributes** | `command.source` |
+| **Attributes** | `command.source` (from the `command:new`/`command:reset` event hooks) **or** `openclaw.session.reset_reason` (from the `before_reset` typed hook) |
 | **Description** | Total session resets |
 
-How often sessions are reset via `/new` or `/reset`. Broken down by channel source.
+Emitted from two different call sites with two different attribute keys — group by whichever one matches the code path you're inspecting; a single query against only one key will undercount.
 
 ---
 
@@ -277,13 +277,13 @@ timeseries percentile(openclaw.llm.duration, 50, 95, 99)
 ### Tool Error Rate
 
 ```
-timeseries sum(openclaw.tool.errors) / sum(openclaw.tool.calls) * 100, by:{tool.name}
+timeseries sum(openclaw.tool.errors) / sum(openclaw.tool.calls) * 100, by:{gen_ai.tool.name}
 ```
 
 ### Most Used Tools
 
 ```
-timeseries sum(openclaw.tool.calls), by:{tool.name}
+timeseries sum(openclaw.tool.calls), by:{gen_ai.tool.name}
 ```
 
 ### Security Events Over Time

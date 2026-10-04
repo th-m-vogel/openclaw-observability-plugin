@@ -175,7 +175,7 @@ If issues arise, switch to the `release/0.1.x` branch:
 {
   "plugins": {
     "load": {
-      "paths": ["https://github.com/henrikrexed/openclaw-observability-plugin.git#release/0.1.x"]
+      "paths": ["https://github.com/th-m-vogel/openclaw-observability-plugin.git#release/0.1.x"]
     },
     "entries": {
       "otel-observability": {

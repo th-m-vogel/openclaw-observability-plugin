@@ -18,6 +18,8 @@ import {
   normalizeContentCapturePolicy,
   parseConfig,
   policyEnablesLlmContent,
+  resolveSignalConfig,
+  type OtelObservabilityConfig,
 } from "../src/config.js";
 
 describe("parseConfig — content capture policy", () => {
@@ -238,5 +240,174 @@ describe("parseConfig — sampleRate diagnostics", () => {
     // Belt-and-suspenders: ensures the configSchema.parse() codepath
     // (which has no logger handy) stays silent and does not throw.
     expect(() => parseConfig({ sampleRate: "bad" })).not.toThrow();
+  });
+});
+
+describe("parseConfig — per-signal endpoint/header overrides", () => {
+  it("has no signalEndpoints/signalHeaders by default", () => {
+    const cfg = parseConfig({});
+    expect(cfg.signalEndpoints).toBeUndefined();
+    expect(cfg.signalHeaders).toBeUndefined();
+  });
+
+  it("parses a full set of per-signal endpoints", () => {
+    const cfg = parseConfig({
+      signalEndpoints: {
+        metrics: "https://metrics.example.com/otlp",
+        logs: "https://logs.example.com/otlp",
+        traces: "https://traces.example.com/otlp",
+      },
+    });
+    expect(cfg.signalEndpoints).toEqual({
+      metrics: "https://metrics.example.com/otlp",
+      logs: "https://logs.example.com/otlp",
+      traces: "https://traces.example.com/otlp",
+    });
+  });
+
+  it("parses a partial set of per-signal endpoints", () => {
+    const cfg = parseConfig({
+      signalEndpoints: { metrics: "https://metrics.example.com/otlp" },
+    });
+    expect(cfg.signalEndpoints).toEqual({
+      metrics: "https://metrics.example.com/otlp",
+    });
+  });
+
+  it("ignores non-string endpoint values", () => {
+    const cfg = parseConfig({
+      signalEndpoints: { metrics: 123 as any, logs: null as any },
+    });
+    expect(cfg.signalEndpoints).toBeUndefined();
+  });
+
+  it("ignores unknown signal keys", () => {
+    const cfg = parseConfig({
+      signalEndpoints: { somethingElse: "https://x.example.com" } as any,
+    });
+    expect(cfg.signalEndpoints).toBeUndefined();
+  });
+
+  it("rejects a non-object signalEndpoints value", () => {
+    const cfg = parseConfig({ signalEndpoints: "not-an-object" as any });
+    expect(cfg.signalEndpoints).toBeUndefined();
+  });
+
+  it("parses per-signal headers independently of signalEndpoints", () => {
+    const cfg = parseConfig({
+      signalHeaders: {
+        logs: { APIKEY: "logs-key" },
+        traces: { APIKEY: "traces-key" },
+      },
+    });
+    expect(cfg.signalHeaders).toEqual({
+      logs: { APIKEY: "logs-key" },
+      traces: { APIKEY: "traces-key" },
+    });
+  });
+
+  it("ignores non-object per-signal header values", () => {
+    const cfg = parseConfig({
+      signalHeaders: { metrics: "not-an-object" as any, logs: 42 as any },
+    });
+    expect(cfg.signalHeaders).toBeUndefined();
+  });
+
+  it("ignores unknown signal keys in signalHeaders", () => {
+    const cfg = parseConfig({
+      signalHeaders: { somethingElse: { APIKEY: "x" } } as any,
+    });
+    expect(cfg.signalHeaders).toBeUndefined();
+  });
+
+  it("rejects a non-object signalHeaders value", () => {
+    const cfg = parseConfig({ signalHeaders: "not-an-object" as any });
+    expect(cfg.signalHeaders).toBeUndefined();
+  });
+
+  it("rejects an array as signalHeaders", () => {
+    const cfg = parseConfig({ signalHeaders: [] as any });
+    expect(cfg.signalHeaders).toBeUndefined();
+  });
+});
+
+describe("resolveSignalConfig", () => {
+  function baseConfig(
+    overrides: Partial<OtelObservabilityConfig> = {},
+  ): OtelObservabilityConfig {
+    return {
+      endpoint: "http://localhost:4318",
+      protocol: "http",
+      serviceName: "test",
+      headers: { Authorization: "Bearer shared" },
+      traces: true,
+      metrics: true,
+      logs: true,
+      captureContent: CONTENT_POLICY_DISABLED,
+      metricsIntervalMs: 30_000,
+      resourceAttributes: {},
+      ...overrides,
+    };
+  }
+
+  it("falls back to the shared endpoint/headers when no override is set", () => {
+    const config = baseConfig();
+    for (const signal of ["metrics", "logs", "traces"] as const) {
+      expect(resolveSignalConfig(config, signal)).toEqual({
+        endpoint: "http://localhost:4318",
+        headers: { Authorization: "Bearer shared" },
+        isOverride: false,
+      });
+    }
+  });
+
+  it("overrides only the targeted signal, leaving others on the shared endpoint", () => {
+    const config = baseConfig({
+      signalEndpoints: { logs: "https://logs.example.com/otlp" },
+      signalHeaders: { logs: { APIKEY: "logs-key" } },
+    });
+    expect(resolveSignalConfig(config, "logs")).toEqual({
+      endpoint: "https://logs.example.com/otlp",
+      headers: { APIKEY: "logs-key" },
+      isOverride: true,
+    });
+    expect(resolveSignalConfig(config, "metrics")).toEqual({
+      endpoint: "http://localhost:4318",
+      headers: { Authorization: "Bearer shared" },
+      isOverride: false,
+    });
+    expect(resolveSignalConfig(config, "traces")).toEqual({
+      endpoint: "http://localhost:4318",
+      headers: { Authorization: "Bearer shared" },
+      isOverride: false,
+    });
+  });
+
+  it("reports isOverride so callers can skip suffix-appending for verbatim per-signal URLs", () => {
+    const config = baseConfig({
+      signalEndpoints: { metrics: "https://metrics.example.com/otlp/v1/metrics" },
+    });
+    expect(resolveSignalConfig(config, "metrics").isOverride).toBe(true);
+    expect(resolveSignalConfig(config, "logs").isOverride).toBe(false);
+    expect(resolveSignalConfig(config, "traces").isOverride).toBe(false);
+  });
+
+  it("overrides all three signals independently", () => {
+    const config = baseConfig({
+      signalEndpoints: {
+        metrics: "https://metrics.example.com/otlp",
+        logs: "https://logs.example.com/otlp",
+        traces: "https://traces.example.com/otlp",
+      },
+    });
+    expect(resolveSignalConfig(config, "metrics").endpoint).toBe(
+      "https://metrics.example.com/otlp",
+    );
+    expect(resolveSignalConfig(config, "logs").endpoint).toBe(
+      "https://logs.example.com/otlp",
+    );
+    expect(resolveSignalConfig(config, "traces").endpoint).toBe(
+      "https://traces.example.com/otlp",
+    );
   });
 });

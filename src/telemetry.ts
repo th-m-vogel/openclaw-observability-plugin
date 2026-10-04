@@ -25,7 +25,7 @@ import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk
 import { OTLPMetricExporter as OTLPMetricExporterHTTP } from "@opentelemetry/exporter-metrics-otlp-http";
 import { OTLPMetricExporter as OTLPMetricExporterGRPC } from "@opentelemetry/exporter-metrics-otlp-grpc";
 
-import type { OtelObservabilityConfig } from "./config.js";
+import { resolveSignalConfig, type OtelObservabilityConfig } from "./config.js";
 import { setupGlobalPropagator } from "./propagation.js";
 import {
   METRIC_OPERATION_DURATION,
@@ -333,15 +333,22 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     schemaUrl: OTEL_SCHEMA_URL,
   });
 
-  // Resolve endpoint suffixes for HTTP protocol
+  // Resolve per-signal endpoint/header overrides (falls back to the
+  // shared `endpoint`/`headers` when unset). The shared `endpoint` gets
+  // the HTTP path suffix OTLP/HTTP expects appended; a per-signal
+  // override is used verbatim (real per-signal backends, e.g. IONOS,
+  // have shapes a fixed suffix can't express — see resolveSignalConfig's
+  // doc comment). gRPC always uses the resolved endpoint as-is.
+  const traceSignal = resolveSignalConfig(config, "traces");
+  const metricsSignal = resolveSignalConfig(config, "metrics");
   const traceEndpoint =
-    config.protocol === "http"
-      ? `${config.endpoint}/v1/traces`
-      : config.endpoint;
+    config.protocol === "http" && !traceSignal.isOverride
+      ? `${traceSignal.endpoint}/v1/traces`
+      : traceSignal.endpoint;
   const metricsEndpoint =
-    config.protocol === "http"
-      ? `${config.endpoint}/v1/metrics`
-      : config.endpoint;
+    config.protocol === "http" && !metricsSignal.isOverride
+      ? `${metricsSignal.endpoint}/v1/metrics`
+      : metricsSignal.endpoint;
 
   // ── Tracing ─────────────────────────────────────────────────────
 
@@ -371,8 +378,8 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
 
       const traceExporter =
         config.protocol === "grpc"
-          ? new OTLPTraceExporterGRPC({ url: traceEndpoint, headers: config.headers })
-          : new OTLPTraceExporterHTTP({ url: traceEndpoint, headers: config.headers });
+          ? new OTLPTraceExporterGRPC({ url: traceEndpoint, headers: traceSignal.headers })
+          : new OTLPTraceExporterHTTP({ url: traceEndpoint, headers: traceSignal.headers });
 
       // Head-based sampling: when sampleRate is set, wrap a TraceIdRatioBased
       // sampler in a ParentBasedSampler so child spans inherit the root
@@ -421,8 +428,8 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
   if (config.metrics) {
     const metricExporter =
       config.protocol === "grpc"
-        ? new OTLPMetricExporterGRPC({ url: metricsEndpoint, headers: config.headers })
-        : new OTLPMetricExporterHTTP({ url: metricsEndpoint, headers: config.headers });
+        ? new OTLPMetricExporterGRPC({ url: metricsEndpoint, headers: metricsSignal.headers })
+        : new OTLPMetricExporterHTTP({ url: metricsEndpoint, headers: metricsSignal.headers });
 
     meterProvider = new MeterProvider({
       resource,
