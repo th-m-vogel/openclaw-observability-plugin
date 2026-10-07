@@ -9,7 +9,7 @@
   "prerelease": false,
   "packages": {
     ".": {
-      "package-name": "@henrikrexed/openclaw-otel-observability",
+      "package-name": "@th-m-vogel/openclaw-otel-observability",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {
