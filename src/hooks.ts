@@ -1155,6 +1155,12 @@ export function registerHooks(
         const responseId = event?.responseId;
         const finishReasons = event?.finishReasons;
         const usage = event?.usage || {};
+        // TEMP (0.11.0-dev diagnostic): the event/usage shape this hook
+        // actually receives in production has never been directly observed
+        // — remove once confirmed against real traffic.
+        logger.debug?.(
+          `[otel] model_call_ended raw shape: event_keys=${JSON.stringify(Object.keys(event ?? {}))}, usage=${JSON.stringify(usage)}`
+        );
         const inputTokens =
           usage.input ?? usage.inputTokens ?? usage.input_tokens ?? 0;
         const outputTokens =
