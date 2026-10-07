@@ -4,7 +4,7 @@ Get OpenTelemetry observability for your OpenClaw AI agents.
 
 ## Prerequisites
 
-- OpenClaw v2026.4.21 or later (see `minOpenClawVersion` in `openclaw.plugin.json`)
+- OpenClaw v2026.9.8 or later (see `minOpenClawVersion` in `openclaw.plugin.json` — raised from v2026.4.21 for real per-call `openclaw.llm.tokens.*`, see `docs/limitations.md`)
 - An OTLP endpoint (local collector, Dynatrace, Grafana, etc.)
 
 ## Option 1: Official Diagnostics Plugin (Recommended Start)

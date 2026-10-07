@@ -26,6 +26,8 @@ That's different from per-call visibility, though, which **is** available, in tw
 
 **Cost is still turn-level only.** No OpenClaw plugin API — the hook pair, the diagnostic events above, or anything else — exposes a per-call cost figure; `model.usage` (the turn-aggregated event) remains the only source for `openclaw.llm.cost.usd`. A feature request asking core to expose real per-call token usage was filed as [openclaw/openclaw#166623](https://github.com/openclaw/openclaw/issues/166623) and closed upstream as already-implemented via the diagnostic-events mechanism above — correctly, once we checked; per-call cost remains unaddressed by that issue or any other known mechanism.
 
+**Codex/ACP-harness sessions may have no token metrics at all (unconfirmed, flagged not fixed).** Codex-harness model calls are already known to emit no `model.usage` at all — a structurally separate code path from the native embedded-agent-runner this plugin's per-call instrumentation targets (see the open items tracked alongside this project). Before 0.12.0, those turns still got *some* token metrics, because the `agent_end` hook fallback this release removed parsed `usage` straight out of the turn's own `messages` array, independent of either diagnostic source. Whether `model.call.completed`/`model.call.error` fire for Codex-harness calls the way they do for the native path hasn't been verified — if they don't, `openclaw.llm.tokens.*` now silently reports nothing for those sessions, a regression from the old (if also schema-broken) fallback. Needs a live check on a Codex-harness-routed session; until then, don't assume parity with the native path for this one case.
+
 ### What You Get vs. What's Missing
 
 | Capability | Status | Details |

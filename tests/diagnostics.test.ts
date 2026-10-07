@@ -112,7 +112,7 @@ describe("internal diagnostics loader path resolution", () => {
     expect(unsubscribe).toEqual(expect.any(Function));
     expect(diagnostics.hasDiagnosticsSupport()).toBe(true);
     expect(logger.warn).not.toHaveBeenCalledWith(
-      "[otel] No diagnostic event source available — using fallback token extraction",
+      "[otel] No diagnostic event source available — openclaw.llm.tokens.* and .cost.usd will not be recorded",
     );
   });
 
@@ -321,8 +321,8 @@ describe("model.call.completed / model.call.error diagnostic events", () => {
         listener({
           type: "model.call.completed",
           sessionKey: "agent:main:new",
-          provider: "ionos",
-          model: "Qwen/Qwen3.5-397B-A17B",
+          provider: "openai-compatible",
+          model: "example/model-1",
           agentId: "main",
           usage: { input: 1000, output: 200, cacheRead: 500, cacheWrite: 50, total: 1250 },
           durationMs: 850,
@@ -335,11 +335,11 @@ describe("model.call.completed / model.call.error diagnostic events", () => {
     await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
 
     const baseAttrs = {
-      "gen_ai.response.model": "Qwen/Qwen3.5-397B-A17B",
+      "gen_ai.response.model": "example/model-1",
       "gen_ai.operation.name": "chat",
       "gen_ai.conversation.id": "agent:main:new",
-      "gen_ai.provider.name": "ionos",
-      "openclaw.provider": "ionos",
+      "gen_ai.provider.name": "openai-compatible",
+      "openclaw.provider": "openai-compatible",
       "gen_ai.agent.id": "main",
     };
     expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(
@@ -450,6 +450,13 @@ describe("internal diagnostics fallback logging", () => {
 
     expect(logger.debug).toHaveBeenCalledWith(
       "[otel] Internal diagnostics chunk not found; falling back to SDK diagnostics",
+    );
+    // No real `openclaw/plugin-sdk` is installed in this test environment
+    // either, so this scenario also exercises the no-event-source-at-all
+    // path (0.12.0+: the old message named a token-extraction fallback
+    // that no longer exists — see hooks.ts's removed agent_end fallback).
+    expect(logger.warn).toHaveBeenCalledWith(
+      "[otel] No diagnostic event source available — openclaw.llm.tokens.* and .cost.usd will not be recorded",
     );
   });
 
