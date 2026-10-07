@@ -697,7 +697,7 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
     stopHooks();
   });
 
-  it("model_call_ended records per-call token/request metrics labeled with conversation id + provider (0.11.0+)", () => {
+  it("model_call_ended records per-call request/duration metrics labeled with conversation id + provider (0.11.0+), but not tokens (real usage data isn't available on this event)", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry } = createTelemetry();
     stopHooks = registerHooks(api, () => telemetry, config);
@@ -715,6 +715,10 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
       {
         sessionKey: "agent:main:new",
         responseModel: "Qwen/Qwen3.5-397B-A17B",
+        // Real production events carry no `usage` at all on this hook —
+        // see the NOTE in hooks.ts's model_call_ended. Included here only
+        // to prove it's ignored for metrics, not to assert this shape is
+        // realistic.
         usage: { input: 40969, output: 369, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
         durationMs: 2500,
       },
@@ -727,9 +731,9 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
       "gen_ai.provider.name": "ionos",
       "openclaw.provider": "ionos",
     });
-    expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(40969, expectedAttrs);
-    expect(telemetry.counters.tokensCompletion.add).toHaveBeenCalledWith(369, expectedAttrs);
-    expect(telemetry.counters.tokensTotal.add).toHaveBeenCalledWith(40969 + 369, expectedAttrs);
+    expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensTotal.add).not.toHaveBeenCalled();
     expect(telemetry.counters.llmRequests.add).toHaveBeenCalledWith(1, expectedAttrs);
     expect(telemetry.histograms.llmDuration.record).toHaveBeenCalledWith(2500, expectedAttrs);
     expect(telemetry.histograms.genAiOperationDuration.record).toHaveBeenCalledWith(2.5, expectedAttrs);
@@ -759,6 +763,51 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
     expect(telemetry.counters.llmErrors.add).toHaveBeenCalledWith(1, expect.any(Object));
 
     stopHooks();
+  });
+
+  it("agent_end records a token-count fallback (labeled with conversation id + provider, 0.11.0+) when model.usage never fired for this turn", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const received = typedHooks.get("message_received")!;
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const agentEnd = typedHooks.get("agent_end")!;
+
+    return Promise.resolve(
+      received({ channel: "cli", sessionKey: "s-fallback", from: "user" }, { sessionKey: "s-fallback" }),
+    ).then(() => {
+      resolve({}, { agentId: "main", sessionKey: "s-fallback" });
+      // No model.usage diagnostic event was ever dispatched for this
+      // session, so diagnostics.getPendingUsage("s-fallback") is undefined
+      // — this exercises the fallback path, not the primary one.
+      return Promise.resolve(
+        agentEnd(
+          {
+            success: true,
+            durationMs: 42,
+            messages: [
+              { role: "assistant", model: "gpt-fallback", usage: { input: 500, output: 50 } },
+            ],
+          },
+          { agentId: "main", sessionKey: "s-fallback" },
+        ),
+      );
+    }).then(() => {
+      const expectedAttrs = expect.objectContaining({
+        "gen_ai.response.model": "gpt-fallback",
+        "gen_ai.conversation.id": "s-fallback",
+        "gen_ai.agent.id": "main",
+      });
+      expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(500, expectedAttrs);
+      expect(telemetry.counters.tokensCompletion.add).toHaveBeenCalledWith(50, expectedAttrs);
+      expect(telemetry.counters.tokensTotal.add).toHaveBeenCalledWith(550, expectedAttrs);
+      // llmRequests/duration are NOT part of this fallback any more — they
+      // come unconditionally from model_call_started/model_call_ended.
+      expect(telemetry.counters.llmRequests.add).not.toHaveBeenCalled();
+
+      stopHooks();
+    });
   });
 
   it("model_call_ended emits gen_ai.response.finish_reasons as string[] (ISI-993)", () => {

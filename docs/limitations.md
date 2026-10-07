@@ -18,24 +18,25 @@ Error: Cannot find module '@opentelemetry/api'
 
 ## Auto-Instrumentation Limitations
 
-## No Zero-Code Auto-Instrumentation (per-call spans/metrics exist via hooks instead)
+## No Zero-Code Auto-Instrumentation (and no per-call token/cost data, even via hooks)
 
 The plugin cannot auto-instrument the Anthropic/OpenAI SDKs themselves (e.g. monkey-patching `anthropic.chat` or `openai.chat.completions.create` the way a traditional OTel auto-instrumentation package would). That's a real, structural limitation of OpenClaw's ESM module architecture — see "Why?" below.
 
-That's different from per-call visibility, though, which **is** available: OpenClaw core exposes `model_call_started`/`model_call_ended` typed hook events, fired once per real model API call (not once per agent turn), and this plugin has used them since ISI-926 to produce a per-call `chat {model}` span alongside the aggregated `openclaw.agent.turn` span. As of 0.11.0, the same hook pair also drives the primary token/request/duration metrics (`openclaw.llm.requests`, `.tokens.*`, `.duration` — see `docs/telemetry/metrics.md`), so metrics and traces are both per-call now, independent of whether tracing is even enabled (the hook fires regardless of `traces`/`metrics` config — see that doc for details). Cost remains the one thing only available at agent-turn granularity, from the separate `model.usage` diagnostic event — core exposes no per-call price lookup anywhere else.
+That's different from per-call visibility, though, which is *partially* available: OpenClaw core exposes `model_call_started`/`model_call_ended` typed hook events, fired once per real model API call (not once per agent turn), and this plugin has used them since ISI-926 to produce a per-call `chat {model}` span alongside the aggregated `openclaw.agent.turn` span. As of 0.11.0, the same hook pair also drives `openclaw.llm.requests`/`.duration` (see `docs/telemetry/metrics.md`) — real per-call request counts and latency, independent of whether tracing is even enabled (the hook fires regardless of `traces`/`metrics` config).
+
+**Token usage and cost are a separate story, and do not have per-call granularity anywhere in OpenClaw's current plugin API** — this was investigated directly in 0.11.0-dev, not assumed. `model_call_ended`'s real event payload was captured live in production and confirmed to carry no usage field at all; its documented purpose is "sanitized provider/model call metadata: timing, outcome, bounded request-id hashes... no prompt or response content" (OpenClaw's own hook reference) — this is deliberate, not a bug or a version-specific gap. The other hook with documented `usage` support, `llm_output`, was also checked live: it reports the exact same turn-aggregated numbers as `model.usage`, not real per-call ones. So token/cost metrics and the `chat {model}` span's own usage attributes all stay at agent-turn granularity — a real ceiling on what this plugin can report, not something more engineering effort here would fix. A feature request asking OpenClaw core to expose real per-call usage has been filed (see `STATUS.md` in the fork's tracking repo for the link once filed); don't expect it soon.
 
 ### What You Get vs. What's Missing
 
 | Capability | Status | Details |
 |---|---|---|
-| Token usage per real call | ✅ | `gen_ai.usage.input_tokens`, `.output_tokens` on the `chat {model}` span; `openclaw.llm.tokens.*` metrics (0.11.0+) |
-| Token usage per agent turn | ✅ | Aggregated across all calls in the turn, on `openclaw.agent.turn` |
+| Token usage per agent turn | ✅ | `gen_ai.usage.input_tokens`/`.output_tokens` on `openclaw.agent.turn` and `openclaw.llm.call`; `openclaw.llm.tokens.*` metrics |
+| Token usage per real call | ❌ | Not available anywhere in OpenClaw's plugin API — see above. The `chat {model}` span exists (per real call) but has no usage attributes to show, since `model_call_ended` carries none |
 | Model name | ✅ | `gen_ai.response.model` on both the turn span and each per-call span |
-| Cache token tracking | ✅ | `cacheRead`/`cacheWrite` (aka `cache_read_input_tokens`/`cache_creation_input_tokens`) on both levels |
-| Per-call spans | ✅ | `chat {model}` CLIENT span per real call, via `model_call_started`/`model_call_ended` |
-| Per-call latency | ✅ | Real call duration — see `openclaw.llm.duration` (0.11.0+) |
-| Per-call metrics with session/provider labels | ✅ | 0.11.0+, see `docs/telemetry/metrics.md` |
-| Cost per real call | ❌ | Only available per agent turn, from `model.usage` — core has no per-call price lookup |
+| Cache token tracking | ✅ | `cacheRead`/`cacheWrite` (aka `cache_read_input_tokens`/`cache_creation_input_tokens`) — per agent turn only, same limitation as above |
+| Per-call spans | ✅ | `chat {model}` CLIENT span per real call, via `model_call_started`/`model_call_ended` (timing/model/provider only, no usage) |
+| Per-call request count & latency | ✅ | `openclaw.llm.requests`/`.duration` (0.11.0+) — these don't need usage data, so they could move to the per-call hook |
+| Cost per real call | ❌ | Only available per agent turn, from `model.usage` — core has no per-call price lookup anywhere |
 | Request/response content | ❌ | No prompt/completion text capture on LLM calls |
 | Standard GenAI dashboards | ⚠️ | Custom dashboards needed (not standard `gen_ai.*` span shape) |
 | Zero-code SDK auto-instrumentation | ❌ | Would require patching `@anthropic-ai/sdk`/OpenAI SDK directly — see below for why that's not viable here |
@@ -87,14 +88,15 @@ Using `register()` from `node:module` to manually install IITM loader hooks prod
 
 ### Path Forward
 
-Item 1 below has since shipped as OpenClaw core's `model_call_started`/`model_call_ended` typed hooks (ISI-926), which this plugin now uses for per-call spans and (0.11.0+) per-call metrics — see above. That closes the per-call-granularity gap this section used to describe; what's left unsolved is genuine zero-code SDK auto-instrumentation:
+Item 1 below has since shipped as OpenClaw core's `model_call_started`/`model_call_ended` typed hooks (ISI-926), which this plugin uses for per-call spans and (0.11.0+) per-call request-count/duration metrics — see above. That closes part of the per-call-granularity gap this section used to describe; what's left unsolved:
 
 1. ~~**LLM call events on the plugin API** — emit `llm_call_start`/`llm_call_end` events so plugins can create per-call spans without monkey-patching~~ — done, see above.
-2. **Built-in OTel hook in pi-ai** — a callback around the actual SDK call in the provider layer
-3. **Fix IITM compatibility** — investigate why IITM breaks `@mariozechner/pi-ai` exports
-4. **Native OTel support** — bundle instrumentation directly in OpenClaw where it can control the loader lifecycle
+2. **Per-call token/cost data on those events** — `model_call_started`/`model_call_ended` exist and fire per real call, but deliberately carry no usage/cost data (confirmed via live capture + OpenClaw's own hook docs, 0.11.0-dev). A feature request has been filed upstream asking for this; it's the single biggest remaining gap in this plugin's observability, and not something fixable without an OpenClaw core change.
+3. **Built-in OTel hook in pi-ai** — a callback around the actual SDK call in the provider layer
+4. **Fix IITM compatibility** — investigate why IITM breaks `@mariozechner/pi-ai` exports
+5. **Native OTel support** — bundle instrumentation directly in OpenClaw where it can control the loader lifecycle
 
-Until one of 2-4 is implemented, this plugin's hook-based approach is the viable path for this ecosystem — zero-code SDK patching isn't — but it already covers per-call spans, metrics, and duration (0.11.0+); the only remaining per-call gap is cost, and request/response content capture.
+Until 2-5 are addressed, this plugin's hook-based approach is the viable path for this ecosystem — zero-code SDK patching isn't — but token/cost reporting is capped at agent-turn granularity regardless of how this plugin is built; that's an OpenClaw platform limitation, not a plugin engineering problem. Realistically, this may not get fixed upstream soon — live with the turn-level granularity for tokens/cost for now, same as before 0.11.0, and lean on the per-call request-count/duration metrics for anything that only needs those two.
 
 ---
 
