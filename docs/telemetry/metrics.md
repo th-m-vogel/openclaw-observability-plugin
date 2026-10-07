@@ -4,7 +4,9 @@ All metrics use the `openclaw.*` namespace and are exported via OTLP at the conf
 
 ## LLM Metrics
 
-> **0.11.0+:** `openclaw.llm.requests` and `.duration` now record once per real model API call, from the `model_call_started`/`model_call_ended` hook pair, instead of once per **agent turn** from the `model.usage` diagnostic event (a turn may cover several real calls in a tool-use loop). `openclaw.llm.tokens.*` and `openclaw.llm.cost.usd` are unchanged — still once per agent turn, from `model.usage` — because that's the only place OpenClaw's plugin API exposes token usage or cost at all; `model_call_started`/`model_call_ended` was investigated as a source for per-call tokens too, but its real event payload carries no usage data (OpenClaw's own hook docs describe it as "timing, outcome, bounded request-id hashes... no response content" — by design, not a gap this plugin can work around). If you're upgrading a dashboard or alert built against pre-0.11.0 semantics: only `openclaw.llm.requests`/`.duration` changed cardinality (one increment per real call instead of per turn); `.tokens.*`/`.cost.usd` behave exactly as before, just now deduplicated against a known core bug (see below).
+> **0.11.0+:** `openclaw.llm.requests` and `.duration` record once per real model API call, from the `model_call_started`/`model_call_ended` hook pair, instead of once per **agent turn** from the `model.usage` diagnostic event (a turn may cover several real calls in a tool-use loop).
+>
+> **0.12.0+ (requires OpenClaw v2026.9.8+):** `openclaw.llm.tokens.*` (prompt/completion/total, including the cache_read/cache_write breakdown) also moved to a per-call source — `model.call.completed`/`model.call.error` *diagnostic events* (via `onInternalDiagnosticEvent`, a different mechanism than the hook pair above). These carry genuine call-scoped usage (`observer.usageField()`) confirmed since that release; the hook pair itself still carries none. `openclaw.llm.cost.usd` is unchanged — still once per agent turn, from `model.usage` — because no per-call cost field exists anywhere in OpenClaw's plugin API. If you're upgrading a dashboard or alert built against pre-0.12.0 semantics: `.tokens.*` cardinality changed the same way `.requests`/`.duration` did in 0.11.0 (one increment per real call instead of per turn); `.cost.usd` behaves exactly as before.
 
 ### `openclaw.llm.requests`
 
@@ -84,7 +86,7 @@ Latency distribution for individual LLM calls (not full agent turns — see `ope
 
 ### Why can't tokens/cost be per-call too?
 
-`openclaw.llm.requests`/`.duration` could move to a per-call hook because they don't need any usage data — a call either happened or it didn't, and timing is always available. Tokens and cost need OpenClaw core to tell the plugin how many tokens a given call used, and the only hook that does is `model.usage`, which reports once per agent turn (the sum across however many real calls happened in it), not per call. See `docs/limitations.md` for the full investigation, including why the obvious-looking alternative (`model_call_started`/`model_call_ended`) doesn't carry this data either.
+`openclaw.llm.requests`/`.duration` moved to a per-call hook in 0.11.0 because they don't need any usage data — a call either happened or it didn't, and timing is always available. `openclaw.llm.tokens.*` needed OpenClaw core to tell the plugin how many tokens a given call used; that didn't exist on the obvious-looking hook pair (`model_call_started`/`model_call_ended`, which deliberately carries no usage), but does exist, since v2026.9.8, on the separate `model.call.completed`/`model.call.error` diagnostic events, which this plugin adopted in 0.12.0. See `docs/limitations.md` for the full investigation and what's still turn-level only (cost).
 
 ## Tool Metrics
 
