@@ -69,7 +69,7 @@ async function loadSdk(): Promise<void> {
   }
 }
 
-type DiagnosticsLogger = { debug?: (message: string) => void };
+type DiagnosticsLogger = { debug?: (message: string) => void; warn?: (message: string) => void };
 
 // Direct access to internal diagnostic events (preferred - bypasses SDK wrapper)
 let onInternalDiagnosticEvent: DiagnosticEventSource | null = null;
@@ -182,6 +182,75 @@ async function loadInternalDiagnostics(logger?: DiagnosticsLogger): Promise<void
   onInternalDiagnosticEvent = await loadInternalDiagnosticEventSource(process.argv[1], logger);
 }
 
+/**
+ * Minimum OpenClaw version this plugin supports for real per-call token
+ * metrics — the release confirmed (commit b2d6842c547d, ancestor of the
+ * v2026.9.8 tag) to spread `observer.usageField()` onto `model.call.completed`
+ * / `model.call.error` internal diagnostic events. Older installs still load
+ * this plugin fine; they just won't have `openclaw.llm.tokens.*` data, since
+ * those events won't carry a `usage` field to read.
+ */
+export const MIN_SUPPORTED_OPENCLAW_VERSION = "2026.9.8";
+
+function resolveOpenclawInstallRoot(entryFile: string | undefined): string | undefined {
+  if (!entryFile) return undefined;
+  const resolvedEntry = safeRealpath(entryFile);
+  const entryDir = path.dirname(resolvedEntry);
+  const entryParent = path.basename(entryDir);
+  return entryParent === "dist" || entryParent === "src"
+    ? path.dirname(entryDir)
+    : entryDir;
+}
+
+function readInstalledOpenclawVersion(installRoot: string | undefined): string | undefined {
+  if (!installRoot) return undefined;
+  try {
+    const raw = fs.readFileSync(path.join(installRoot, "package.json"), "utf8");
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === "string" ? parsed.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Compares two dot-separated, OpenClaw-style `YYYY.M.D` version strings.
+ * Returns negative if `a` < `b`, positive if `a` > `b`, 0 if equal.
+ * Each segment is read with `parseInt`, which stops at the first
+ * non-digit character — good enough to not misjudge a pre-release string
+ * like "2026.9.8-canary.3" (reads as 2026.9.8) as older than it is, with
+ * no `semver` dependency needed for OpenClaw's actual version shape.
+ */
+function compareVersions(a: string, b: string): number {
+  const partsA = a.split(".");
+  const partsB = b.split(".");
+  const len = Math.max(partsA.length, partsB.length);
+  for (let i = 0; i < len; i++) {
+    const numA = Number.parseInt(partsA[i] ?? "0", 10) || 0;
+    const numB = Number.parseInt(partsB[i] ?? "0", 10) || 0;
+    if (numA !== numB) return numA - numB;
+  }
+  return 0;
+}
+
+let minVersionCheckDone = false;
+
+function checkMinimumOpenclawVersion(entryFile: string | undefined, logger?: DiagnosticsLogger): void {
+  if (minVersionCheckDone) return;
+  minVersionCheckDone = true;
+  const installedVersion = readInstalledOpenclawVersion(resolveOpenclawInstallRoot(entryFile));
+  if (!installedVersion) {
+    logger?.debug?.("[otel] Could not determine installed OpenClaw version; skipping minimum-version check");
+    return;
+  }
+  if (compareVersions(installedVersion, MIN_SUPPORTED_OPENCLAW_VERSION) < 0) {
+    logger?.warn?.(
+      `[otel] Detected OpenClaw v${installedVersion}, below this plugin's minimum supported version v${MIN_SUPPORTED_OPENCLAW_VERSION}. ` +
+      `Real per-call token metrics (openclaw.llm.tokens.*) require v${MIN_SUPPORTED_OPENCLAW_VERSION}+ and will be missing or incomplete on this install. See docs/limitations.md.`
+    );
+  }
+}
+
 /** Pending usage data waiting to be attached to spans */
 interface PendingUsageData {
   costUsd?: number;
@@ -231,6 +300,7 @@ export async function registerDiagnosticsListener(
   // Load the SDK if not already loaded
   await loadSdk();
   await loadInternalDiagnostics(logger);
+  checkMinimumOpenclawVersion(process.argv[1], logger);
 
   // Use internal diagnostic events if available, otherwise fall back to SDK
   const eventSource = onInternalDiagnosticEvent || onDiagnosticEvent;
