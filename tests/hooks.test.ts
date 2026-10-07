@@ -765,7 +765,7 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
     stopHooks();
   });
 
-  it("agent_end records a token-count fallback (labeled with conversation id + provider, 0.11.0+) when model.usage never fired for this turn", () => {
+  it("agent_end no longer records a token-count metric fallback when model.usage never fired for this turn (0.12.0+: tokens come from diagnostics.ts's model.call.completed/model.call.error instead)", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry } = createTelemetry();
     stopHooks = registerHooks(api, () => telemetry, config);
@@ -779,8 +779,8 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
     ).then(() => {
       resolve({}, { agentId: "main", sessionKey: "s-fallback" });
       // No model.usage diagnostic event was ever dispatched for this
-      // session, so diagnostics.getPendingUsage("s-fallback") is undefined
-      // — this exercises the fallback path, not the primary one.
+      // session (diagnostics.getPendingUsage("s-fallback") is undefined),
+      // the same situation the old fallback used to react to.
       return Promise.resolve(
         agentEnd(
           {
@@ -794,16 +794,13 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
         ),
       );
     }).then(() => {
-      const expectedAttrs = expect.objectContaining({
-        "gen_ai.response.model": "gpt-fallback",
-        "gen_ai.conversation.id": "s-fallback",
-        "gen_ai.agent.id": "main",
-      });
-      expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(500, expectedAttrs);
-      expect(telemetry.counters.tokensCompletion.add).toHaveBeenCalledWith(50, expectedAttrs);
-      expect(telemetry.counters.tokensTotal.add).toHaveBeenCalledWith(550, expectedAttrs);
-      // llmRequests/duration are NOT part of this fallback any more — they
-      // come unconditionally from model_call_started/model_call_ended.
+      // Counter metrics are NOT recorded here any more — real per-call
+      // tokens come unconditionally from diagnostics.ts's
+      // model.call.completed/model.call.error handling (see
+      // diagnostics.test.ts), independent of whether model.usage fires.
+      expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
+      expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();
+      expect(telemetry.counters.tokensTotal.add).not.toHaveBeenCalled();
       expect(telemetry.counters.llmRequests.add).not.toHaveBeenCalled();
 
       stopHooks();
