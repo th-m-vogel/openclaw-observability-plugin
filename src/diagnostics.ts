@@ -13,6 +13,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { TelemetryRuntime } from "./telemetry.js";
 import {
+  GEN_AI_AGENT_ID,
   GEN_AI_CONVERSATION_ID,
   GEN_AI_OPERATION_NAME,
   GEN_AI_PROVIDER_NAME,
@@ -22,6 +23,7 @@ import {
   GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
   GEN_AI_USAGE_INPUT_TOKENS,
   GEN_AI_USAGE_OUTPUT_TOKENS,
+  OP_CHAT,
   OP_INVOKE_AGENT,
   OC_PROVIDER,
   TOKEN_TYPE_INPUT,
@@ -445,6 +447,73 @@ export async function registerDiagnosticsListener(
       return;
     }
 
+    // 0.12.0+: real per-call token usage. Unlike `model_call_started`/
+    // `model_call_ended` (the plugin *hooks*, confirmed to carry no usage
+    // field — see hooks.ts), these are `onInternalDiagnosticEvent`
+    // *diagnostic events* — a different mechanism, verified live against
+    // OpenClaw v2026.9.8 to spread `observer.usageField()` (call-scoped,
+    // read from that call's own terminal provider response) onto the
+    // payload. Fires once per real model API call, unconditionally —
+    // same reliability class as the per-call request/duration hooks in
+    // hooks.ts — so no fallback is needed the way `model.usage` (a
+    // turn-level event) needed one. See openclaw/openclaw#166623.
+    if (evt.type === "model.call.completed" || evt.type === "model.call.error") {
+      const usage = evt.usage;
+      if (!usage) return;
+
+      const sessionKey = evt.sessionKey || "unknown";
+      const model = evt.model || "unknown";
+      const metricAttrs: Record<string, string> = {
+        [GEN_AI_RESPONSE_MODEL]: model,
+        [GEN_AI_OPERATION_NAME]: OP_CHAT,
+        [GEN_AI_CONVERSATION_ID]: sessionKey,
+      };
+      if (evt.provider && evt.provider !== "unknown") {
+        metricAttrs[GEN_AI_PROVIDER_NAME] = evt.provider;
+        metricAttrs[OC_PROVIDER] = evt.provider;
+      }
+      if (evt.agentId && evt.agentId !== "unknown") {
+        metricAttrs[GEN_AI_AGENT_ID] = evt.agentId;
+      }
+
+      if (usage.input) {
+        counters.tokensPrompt.add(usage.input, metricAttrs);
+        histograms.genAiTokenUsage.record(usage.input, {
+          ...metricAttrs,
+          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
+        });
+      }
+      if (usage.output) {
+        counters.tokensCompletion.add(usage.output, metricAttrs);
+        histograms.genAiTokenUsage.record(usage.output, {
+          ...metricAttrs,
+          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
+        });
+      }
+      if (usage.cacheRead) {
+        counters.tokensPrompt.add(usage.cacheRead, { ...metricAttrs, "token.type": "cache_read" });
+        histograms.genAiTokenUsage.record(usage.cacheRead, {
+          ...metricAttrs,
+          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
+        });
+      }
+      if (usage.cacheWrite) {
+        counters.tokensPrompt.add(usage.cacheWrite, { ...metricAttrs, "token.type": "cache_write" });
+        histograms.genAiTokenUsage.record(usage.cacheWrite, {
+          ...metricAttrs,
+          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
+        });
+      }
+      if (usage.total) {
+        counters.tokensTotal.add(usage.total, metricAttrs);
+      }
+
+      logger.debug?.(
+        `[otel] ${evt.type}: session=${sessionKey}, model=${model}, tokens=${usage.total ?? "?"}`
+      );
+      return;
+    }
+
     if (evt.type !== "model.usage") return;
 
     const sessionKey = evt.sessionKey || "unknown";
@@ -480,14 +549,16 @@ export async function registerDiagnosticsListener(
     // trace with several `chat {model}` spans under one `openclaw.agent.turn`
     // for an example) and are immune to this event's known core-side
     // double-dispatch bug (openclaw/openclaw#166289) since they're tied to
-    // a real, individually-identified call. Token counts and cost stay
-    // here — real per-call usage was investigated (0.11.0-dev) and
-    // confirmed unavailable anywhere in the plugin API today: neither
-    // `model_call_ended` (OpenClaw's own hook docs describe it as
-    // "timing, outcome, bounded request-id hashes... no response content")
-    // nor `llm_output` (same turn-aggregated numbers as this event, just a
-    // different hook) carry per-call usage. This event is the only source,
-    // so it's worth protecting against #166289 with the dedup guard below.
+    // a real, individually-identified call.
+    //
+    // NOTE (0.12.0): `openclaw.llm.tokens.*` moved the same way, onto the
+    // `model.call.completed`/`model.call.error` diagnostic events above —
+    // real per-call usage, confirmed available since OpenClaw v2026.9.8
+    // (openclaw/openclaw#166623). What stays here: cost (no per-call cost
+    // field exists anywhere in the plugin API) and the ISI-1018
+    // system/user/tool_result/skill breakdown (not present in per-call
+    // usage either). Both still need the dedup guard below, since this
+    // event can still double-dispatch (#166289).
     const dedupKey = `${sessionKey}|${model}|${costUsd ?? "?"}|${usage.total ?? "?"}`;
     const now = Date.now();
     const lastSeen = recentUsageEvents.get(dedupKey);
@@ -500,38 +571,6 @@ export async function registerDiagnosticsListener(
     }
 
     if (!isDuplicate) {
-      if (usage.input) {
-        counters.tokensPrompt.add(usage.input, metricAttrs);
-        histograms.genAiTokenUsage.record(usage.input, {
-          ...metricAttrs,
-          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
-        });
-      }
-      if (usage.output) {
-        counters.tokensCompletion.add(usage.output, metricAttrs);
-        histograms.genAiTokenUsage.record(usage.output, {
-          ...metricAttrs,
-          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
-        });
-      }
-      if (usage.cacheRead) {
-        counters.tokensPrompt.add(usage.cacheRead, { ...metricAttrs, "token.type": "cache_read" });
-        histograms.genAiTokenUsage.record(usage.cacheRead, {
-          ...metricAttrs,
-          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
-        });
-      }
-      if (usage.cacheWrite) {
-        counters.tokensPrompt.add(usage.cacheWrite, { ...metricAttrs, "token.type": "cache_write" });
-        histograms.genAiTokenUsage.record(usage.cacheWrite, {
-          ...metricAttrs,
-          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
-        });
-      }
-      if (usage.total) {
-        counters.tokensTotal.add(usage.total, metricAttrs);
-      }
-
       // ISI-1018: Token breakdown by type (system, user, tool_result, skill)
       if (usage.system) {
         counters.tokensSystem.add(usage.system, metricAttrs);
