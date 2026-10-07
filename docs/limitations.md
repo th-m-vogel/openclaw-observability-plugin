@@ -18,29 +18,31 @@ Error: Cannot find module '@opentelemetry/api'
 
 ## Auto-Instrumentation Limitations
 
-## No Per-LLM-Call Auto-Instrumentation
+## No Zero-Code Auto-Instrumentation (per-call spans/metrics exist via hooks instead)
 
-The plugin cannot produce individual spans for each LLM API call (e.g., `anthropic.chat` or `openai.chat.completions.create`). Instead, token usage and model info are captured per **agent turn** — aggregated across all LLM calls within a single turn.
+The plugin cannot auto-instrument the Anthropic/OpenAI SDKs themselves (e.g. monkey-patching `anthropic.chat` or `openai.chat.completions.create` the way a traditional OTel auto-instrumentation package would). That's a real, structural limitation of OpenClaw's ESM module architecture — see "Why?" below.
+
+That's different from per-call visibility, though, which **is** available: OpenClaw core exposes `model_call_started`/`model_call_ended` typed hook events, fired once per real model API call (not once per agent turn), and this plugin has used them since ISI-926 to produce a per-call `chat {model}` span alongside the aggregated `openclaw.agent.turn` span. As of 0.11.0, the same hook pair also drives the primary token/request/duration metrics (`openclaw.llm.requests`, `.tokens.*`, `.duration` — see `docs/telemetry/metrics.md`), so metrics and traces are both per-call now, independent of whether tracing is even enabled (the hook fires regardless of `traces`/`metrics` config — see that doc for details). Cost remains the one thing only available at agent-turn granularity, from the separate `model.usage` diagnostic event — core exposes no per-call price lookup anywhere else.
 
 ### What You Get vs. What's Missing
 
 | Capability | Status | Details |
 |---|---|---|
-| Token usage per agent turn | ✅ | `gen_ai.usage.input_tokens`, `.output_tokens`, `.total_tokens` |
-| Model name | ✅ | `gen_ai.response.model` on agent turn span |
-| Cache token tracking | ✅ | `cacheRead` and `cacheWrite` included in totals |
-| Agent turn duration | ✅ | Full turn timing as span duration + histogram |
-| Tool execution spans | ✅ | Individual `tool.*` spans per tool call |
-| Connected traces | ✅ | `openclaw.request` → `openclaw.agent.turn` → `tool.*` |
-| Per-LLM-call spans | ❌ | No individual `anthropic.chat` spans |
-| Per-LLM-call latency | ❌ | Only full turn duration, not individual call timing |
-| Multiple LLM calls per turn | ⚠️ | Token counts summed; can't distinguish individual calls |
+| Token usage per real call | ✅ | `gen_ai.usage.input_tokens`, `.output_tokens` on the `chat {model}` span; `openclaw.llm.tokens.*` metrics (0.11.0+) |
+| Token usage per agent turn | ✅ | Aggregated across all calls in the turn, on `openclaw.agent.turn` |
+| Model name | ✅ | `gen_ai.response.model` on both the turn span and each per-call span |
+| Cache token tracking | ✅ | `cacheRead`/`cacheWrite` (aka `cache_read_input_tokens`/`cache_creation_input_tokens`) on both levels |
+| Per-call spans | ✅ | `chat {model}` CLIENT span per real call, via `model_call_started`/`model_call_ended` |
+| Per-call latency | ✅ | Real call duration — see `openclaw.llm.duration` (0.11.0+) |
+| Per-call metrics with session/provider labels | ✅ | 0.11.0+, see `docs/telemetry/metrics.md` |
+| Cost per real call | ❌ | Only available per agent turn, from `model.usage` — core has no per-call price lookup |
 | Request/response content | ❌ | No prompt/completion text capture on LLM calls |
 | Standard GenAI dashboards | ⚠️ | Custom dashboards needed (not standard `gen_ai.*` span shape) |
+| Zero-code SDK auto-instrumentation | ❌ | Would require patching `@anthropic-ai/sdk`/OpenAI SDK directly — see below for why that's not viable here |
 
-### Why?
+### Why no zero-code auto-instrumentation?
 
-We attempted three approaches to enable auto-instrumentation. All failed due to OpenClaw's ESM module architecture.
+We attempted three approaches. All failed due to OpenClaw's ESM module architecture.
 
 #### Approach 1: Plugin-Side SDK Patching
 
@@ -85,14 +87,14 @@ Using `register()` from `node:module` to manually install IITM loader hooks prod
 
 ### Path Forward
 
-A [feature request](https://github.com/openclaw/openclaw/issues) has been filed on the OpenClaw project suggesting:
+Item 1 below has since shipped as OpenClaw core's `model_call_started`/`model_call_ended` typed hooks (ISI-926), which this plugin now uses for per-call spans and (0.11.0+) per-call metrics — see above. That closes the per-call-granularity gap this section used to describe; what's left unsolved is genuine zero-code SDK auto-instrumentation:
 
-1. **LLM call events on the plugin API** — emit `llm_call_start`/`llm_call_end` events so plugins can create per-call spans without monkey-patching
+1. ~~**LLM call events on the plugin API** — emit `llm_call_start`/`llm_call_end` events so plugins can create per-call spans without monkey-patching~~ — done, see above.
 2. **Built-in OTel hook in pi-ai** — a callback around the actual SDK call in the provider layer
 3. **Fix IITM compatibility** — investigate why IITM breaks `@mariozechner/pi-ai` exports
 4. **Native OTel support** — bundle instrumentation directly in OpenClaw where it can control the loader lifecycle
 
-Until one of these is implemented, the hook-based approach provides solid observability for token tracking, tool monitoring, and request tracing — just without per-LLM-call granularity.
+Until one of 2-4 is implemented, this plugin's hook-based approach is the viable path for this ecosystem — zero-code SDK patching isn't — but it already covers per-call spans, metrics, and duration (0.11.0+); the only remaining per-call gap is cost, and request/response content capture.
 
 ---
 
