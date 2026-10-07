@@ -20,6 +20,10 @@ function writeChunk(root: string, source: string, chunkName?: string): string {
   return chunk;
 }
 
+function writeOpenclawPackageJson(root: string, version: string): void {
+  writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "openclaw", version }));
+}
+
 function createLogger() {
   return {
     debug: vi.fn(),
@@ -387,5 +391,70 @@ describe("internal diagnostics fallback logging", () => {
     const { diagnostics } = await registerWithEntry(path.join(root, "openclaw.mjs"));
 
     expect(diagnostics.hasDiagnosticsSupport()).toBe(false);
+  });
+});
+
+describe("minimum OpenClaw version check", () => {
+  it("warns once when the installed OpenClaw version is below the plugin's minimum", async () => {
+    const root = makeInstallRoot();
+    writeOpenclawPackageJson(root, "2026.9.7");
+    writeChunk(root, "export function onInternalDiagnosticEvent() { return () => undefined; }\n");
+    const logger = createLogger();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), logger);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Detected OpenClaw v2026.9.7, below this plugin's minimum supported version v2026.9.8",
+      ),
+    );
+  });
+
+  it("does not warn when the installed OpenClaw version exactly meets the minimum", async () => {
+    const root = makeInstallRoot();
+    writeOpenclawPackageJson(root, "2026.9.8");
+    writeChunk(root, "export function onInternalDiagnosticEvent() { return () => undefined; }\n");
+    const logger = createLogger();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), logger);
+
+    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining("minimum supported version"));
+  });
+
+  it("does not warn when the installed OpenClaw version exceeds the minimum", async () => {
+    const root = makeInstallRoot();
+    writeOpenclawPackageJson(root, "2026.10.1");
+    writeChunk(root, "export function onInternalDiagnosticEvent() { return () => undefined; }\n");
+    const logger = createLogger();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), logger);
+
+    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining("minimum supported version"));
+  });
+
+  it("does not misread an unparseable pre-release version string as below minimum", async () => {
+    const root = makeInstallRoot();
+    // A dev/canary build string — parseInt stops at the first non-digit
+    // character, so "8-canary" still reads as the numeric segment 8.
+    writeOpenclawPackageJson(root, "2026.9.8-canary.3");
+    writeChunk(root, "export function onInternalDiagnosticEvent() { return () => undefined; }\n");
+    const logger = createLogger();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), logger);
+
+    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining("minimum supported version"));
+  });
+
+  it("logs at debug level, not warn, when the installed version cannot be determined", async () => {
+    const root = makeInstallRoot(); // no package.json written
+    writeChunk(root, "export function onInternalDiagnosticEvent() { return () => undefined; }\n");
+    const logger = createLogger();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), logger);
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      "[otel] Could not determine installed OpenClaw version; skipping minimum-version check",
+    );
+    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining("minimum supported version"));
   });
 });
