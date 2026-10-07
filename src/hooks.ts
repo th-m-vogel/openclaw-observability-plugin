@@ -1163,15 +1163,15 @@ export function registerHooks(
         // OpenClaw's own hook-reference docs, which describe this hook pair
         // as "sanitized provider/model call metadata: timing, outcome,
         // bounded request-id hashes — no prompt or response content" (i.e.
-        // deliberately excludes usage, not a bug). The extraction below is
-        // dead code kept only so the span attributes below populate
-        // correctly if a future OpenClaw version ever adds it — don't expect
-        // it to. Real per-call usage doesn't exist anywhere in the plugin
-        // API today; `openclaw.llm.call` (llm_input/llm_output) and
-        // `openclaw.agent.turn`/`model.usage` all report the same
-        // turn-aggregated numbers, not per-call ones. Filed upstream:
-        // openclaw/openclaw — "expose real per-call token usage on
-        // model_call_ended" — filed as openclaw/openclaw#166623.
+        // deliberately excludes usage, not a bug — still true as of
+        // v2026.9.8, this is specific to this hook). The extraction below
+        // is dead code kept only so the span attributes below populate
+        // correctly if a future OpenClaw version ever adds it. Real
+        // per-call usage DOES exist elsewhere, though — the sibling
+        // model.call.completed/model.call.error *diagnostic events* (not
+        // this hook) carry it since v2026.9.8; see diagnostics.ts, which
+        // is where openclaw.llm.tokens.* now comes from (0.12.0+).
+        // openclaw/openclaw#166623 was closed upstream on that basis.
         const usage = event?.usage || {};
         const inputTokens =
           usage.input ?? usage.inputTokens ?? usage.input_tokens ?? 0;
@@ -1257,11 +1257,14 @@ export function registerHooks(
         // closing. Fires once per real model API call, independent of
         // `traces`/`metrics` config — the OTel no-op meter absorbs calls
         // when metrics are disabled. Token metrics are NOT recorded here —
-        // see the NOTE above `usage` extraction for why — they stay on the
-        // `model.usage`-driven path in diagnostics.ts. Request count and
-        // duration, unlike tokens/cost, don't need usage data at all, so
-        // this hook firing once per real call (rather than once per
-        // agent turn, and immune to the model.usage double-dispatch bug,
+        // this hook's own payload genuinely carries no usage (see the NOTE
+        // above). Real per-call token metrics instead come from the
+        // sibling model.call.completed/model.call.error *diagnostic
+        // events* (a different mechanism — see diagnostics.ts), which do
+        // carry usage since OpenClaw v2026.9.8 (openclaw/openclaw#166623).
+        // Request count and duration don't need usage data at all, so this
+        // hook firing once per real call (rather than once per agent
+        // turn, and immune to the model.usage double-dispatch bug,
         // openclaw/openclaw#166289) is a genuine accuracy improvement for
         // these two metrics specifically.
         try {
@@ -2241,55 +2244,16 @@ export function registerHooks(
             agentSpan.setAttribute("openclaw.context.used", diagUsage.context.used);
           }
 
-          // Token-count fallback for turns where `model.usage` never fired
-          // at all (the known custom-model-costUsd-undefined-style gap —
-          // see docs/limitations.md). Labeled with the SAME schema as
-          // diagnostics.ts's primary path (conversation id + provider) —
-          // before 0.11.0 this used only `gen_ai.agent.id`, a disjoint
-          // label set that made a dashboard `sum()` silently miss this
-          // fallback's contribution whenever a panel filtered/grouped by
-          // `gen_ai.conversation.id`. `llmRequests`/duration don't need a
-          // fallback any more: they're recorded unconditionally from the
-          // per-call `model_call_started`/`model_call_ended` hooks above,
-          // which fire on every real call regardless of whether this
-          // turn-level diagnostic event ever arrives.
-          if (!diagUsage && (totalInputTokens > 0 || totalOutputTokens > 0)) {
-            const metricAttrs: Record<string, string> = {
-              [GEN_AI_RESPONSE_MODEL]: model,
-              [GEN_AI_OPERATION_NAME]: OP_INVOKE_AGENT,
-              [GEN_AI_CONVERSATION_ID]: sessionKey,
-              [GEN_AI_AGENT_ID]: agentId,
-              "openclaw.agent.id": agentId,
-            };
-            if (diagProvider && diagProvider !== "unknown") {
-              metricAttrs[GEN_AI_PROVIDER_NAME] = diagProvider;
-              metricAttrs[OC_PROVIDER] = diagProvider;
-            }
-            counters.tokensPrompt.add(totalInputTokens + cacheReadTokens + cacheWriteTokens, metricAttrs);
-            counters.tokensCompletion.add(totalOutputTokens, metricAttrs);
-            counters.tokensTotal.add(totalInputTokens + totalOutputTokens + cacheReadTokens + cacheWriteTokens, metricAttrs);
-
-            histograms.genAiTokenUsage.record(totalInputTokens, {
-              ...metricAttrs,
-              [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
-            });
-            histograms.genAiTokenUsage.record(totalOutputTokens, {
-              ...metricAttrs,
-              [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
-            });
-            if (cacheReadTokens > 0) {
-              histograms.genAiTokenUsage.record(cacheReadTokens, {
-                ...metricAttrs,
-                [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
-              });
-            }
-            if (cacheWriteTokens > 0) {
-              histograms.genAiTokenUsage.record(cacheWriteTokens, {
-                ...metricAttrs,
-                [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
-              });
-            }
-          }
+          // 0.12.0+: the token-count metric fallback that used to live
+          // here (for turns where `model.usage` never fired) was removed
+          // — openclaw.llm.tokens.* now comes unconditionally from
+          // diagnostics.ts's model.call.completed/model.call.error
+          // handling, which fires per real call independent of whether
+          // this turn-level model.usage event ever arrives. The span
+          // attributes above (gen_ai.usage.input_tokens etc. on
+          // agentSpan) still use totalInputTokens/totalOutputTokens/
+          // cacheReadTokens/cacheWriteTokens computed earlier in this
+          // function — those are unaffected by this removal.
 
           // Record duration histograms — legacy (ms) and stable GenAI (s).
           if (typeof durationMs === "number") {
