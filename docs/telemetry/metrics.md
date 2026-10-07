@@ -4,15 +4,18 @@ All metrics use the `openclaw.*` namespace and are exported via OTLP at the conf
 
 ## LLM Metrics
 
+> **0.11.0+:** `openclaw.llm.requests`, `.tokens.total`, `.tokens.prompt`, `.tokens.completion`, `.errors`, and `.duration` are now recorded from the `model_call_started`/`model_call_ended` hook pair — once per real model API call — instead of from the `model.usage` diagnostic event (which fires once per **agent turn**, and may cover several real calls in a tool-use loop). Each increment is labeled with `gen_ai.conversation.id` and `gen_ai.provider.name` (when known), so you can filter/group by session reliably. Before 0.11.0, these metrics came from `model.usage` directly, plus a separate agent-turn-level fallback with a different, incompatible label set (no conversation id) for turns where that event never fired — both are gone now, replaced by this one consistent path. If you're upgrading a dashboard or alert built against the pre-0.11.0 semantics: totals over a time range are the same real usage either way, but what used to be "one `openclaw.llm.requests` increment per agent turn" is now "one per real model call within that turn."
+
 ### `openclaw.llm.requests`
 
 | | |
 |---|---|
 | **Type** | Counter |
 | **Unit** | requests |
-| **Description** | Total number of LLM API requests made |
+| **Attributes** | `gen_ai.response.model`, `gen_ai.conversation.id`, `gen_ai.provider.name` (when known), `openclaw.provider` (legacy mirror) |
+| **Description** | Total number of real LLM API calls made |
 
-Tracks every call to Anthropic or OpenAI APIs. Use this to understand request volume over time.
+Tracks every call to Anthropic, OpenAI, or any other configured provider — one increment per real call, not per agent turn. Use this to understand request volume over time.
 
 ---
 
@@ -22,6 +25,7 @@ Tracks every call to Anthropic or OpenAI APIs. Use this to understand request vo
 |---|---|
 | **Type** | Counter |
 | **Unit** | errors |
+| **Attributes** | Same as `openclaw.llm.requests` |
 | **Description** | Total number of LLM API errors |
 
 Counts failed LLM calls (rate limits, timeouts, invalid requests, etc.). A spike here usually means rate limiting or API issues.
@@ -34,9 +38,10 @@ Counts failed LLM calls (rate limits, timeouts, invalid requests, etc.). A spike
 |---|---|
 | **Type** | Counter |
 | **Unit** | tokens |
-| **Description** | Total tokens consumed (prompt + completion) |
+| **Attributes** | Same as `openclaw.llm.requests` |
+| **Description** | Total tokens consumed per real call (prompt + completion + cache read + cache write) |
 
-The primary cost metric. Combine with model information to estimate costs.
+The primary cost metric. Combine with model information to estimate costs. Cost itself (`openclaw.llm.cost.usd`) is still recorded separately from the `model.usage` diagnostic event, once per agent turn — see the cost-metadata docs for why (core exposes no per-call price lookup anywhere else).
 
 ---
 
@@ -46,9 +51,10 @@ The primary cost metric. Combine with model information to estimate costs.
 |---|---|
 | **Type** | Counter |
 | **Unit** | tokens |
-| **Description** | Prompt tokens consumed |
+| **Attributes** | Same as `openclaw.llm.requests`, plus `token.type` (`cache_read`/`cache_write`) on the cache-token increments |
+| **Description** | Prompt tokens consumed per real call |
 
-Tracks input tokens. High prompt token counts may indicate large system prompts, long conversation histories, or excessive context injection.
+Tracks input tokens. High prompt token counts may indicate large system prompts, long conversation histories, or excessive context injection. Note this grows with real, incremental per-call usage — in a non-caching provider, each call in a long conversation legitimately carries more input than the last, since the full history gets resent; that's real billed usage, not double-counting.
 
 ---
 
@@ -58,7 +64,8 @@ Tracks input tokens. High prompt token counts may indicate large system prompts,
 |---|---|
 | **Type** | Counter |
 | **Unit** | tokens |
-| **Description** | Completion tokens consumed |
+| **Attributes** | Same as `openclaw.llm.requests` |
+| **Description** | Completion tokens consumed per real call |
 
 Tracks output tokens. Useful for understanding response verbosity.
 
@@ -70,9 +77,10 @@ Tracks output tokens. Useful for understanding response verbosity.
 |---|---|
 | **Type** | Histogram |
 | **Unit** | ms |
-| **Description** | LLM request duration in milliseconds |
+| **Attributes** | Same as `openclaw.llm.requests` |
+| **Description** | Real model API call duration in milliseconds |
 
-Latency distribution for LLM calls. Use percentiles (p50, p95, p99) to understand typical and worst-case latency.
+Latency distribution for individual LLM calls (not full agent turns — see `openclaw.agent.turn_duration` for that). Use percentiles (p50, p95, p99) to understand typical and worst-case latency.
 
 ## Tool Metrics
 

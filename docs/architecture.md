@@ -226,6 +226,14 @@ Gateway Agent Loop              Custom Plugin
      │                               │      with prompt.chars +
      │                               │      session.message_count
      │                               │
+     │  on("model_call_started")     │
+     │ ─────────────────────────────>│  ──> create CHAT span (per real call)
+     │  (once per real LLM call)     │      (child of agent turn)
+     │                               │
+     │  on("model_call_ended")       │
+     │ ─────────────────────────────>│  ──> close CHAT span with usage
+     │                               │      update per-call metrics (0.11.0+)
+     │                               │
      │  on("tool_result_persist")    │
      │ ─────────────────────────────>│  ──> create TOOL span
      │  (called for each tool)       │      (child of agent turn)
@@ -234,6 +242,8 @@ Gateway Agent Loop              Custom Plugin
      │ ─────────────────────────────>│  ──> end agent turn span
      │                               │      end root span
      │                               │      extract tokens from messages
+     │                               │      (enriches turn span only, 0.11.0+ —
+     │                               │       see Data Flow Comparison below)
 ```
 
 ### Trace Context Propagation
@@ -316,17 +326,20 @@ openclaw.request (root)
 
 ### OTel Signals Created
 
-**Metrics (emitted by this plugin):**
+**Metrics (emitted by this plugin, see `docs/telemetry/metrics.md` for the full reference):**
 ```
-openclaw.llm.tokens.total        # counter, by gen_ai.response.model
-openclaw.llm.tokens.prompt       # counter
-openclaw.llm.tokens.completion   # counter
-openclaw.llm.cost.usd            # counter, by gen_ai.response.model
+openclaw.llm.requests            # counter, per real call (0.11.0+)
+openclaw.llm.errors              # counter, per real call (0.11.0+)
+openclaw.llm.tokens.total        # counter, per real call (0.11.0+), by gen_ai.response.model
+openclaw.llm.tokens.prompt       # counter, per real call (0.11.0+)
+openclaw.llm.tokens.completion   # counter, per real call (0.11.0+)
+openclaw.llm.duration            # histogram, per real call (0.11.0+)
+openclaw.llm.cost.usd            # counter, per agent turn, by gen_ai.response.model
 openclaw.tool.calls              # counter
 openclaw.session.resets          # counter
 ```
 
-The OTel-stable `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` are recorded as **span attributes** on the LLM/agent-turn spans (see the trace structure above) — not as separate metric instruments.
+The OTel-stable `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` are recorded as **span attributes** on both the per-call `chat {model}` span and the aggregated `openclaw.agent.turn` span (see the trace structure above), in addition to the per-call counters above.
 
 **Traces (emitted by this plugin):** see the trace tree above (`openclaw.request` → `openclaw.session` → `openclaw.agent.turn` → child spans).
 
@@ -354,19 +367,35 @@ The OTel-stable `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` are r
 
 ### Custom Plugin: Token Tracking
 
+**0.11.0+** — two separate paths, split by what's exclusively available on each:
+
 ```
+Per real model call (openclaw.llm.requests / .tokens.* / .duration / .errors):
 1. Agent calls LLM via pi-ai
-2. pi-ai returns response with .usage
-3. Gateway fires agent_end hook with:
-   - messages: [...including assistant messages with .usage]
-4. Custom plugin:
-   - Parses messages for usage data
-   - Checks for pending diagnostic data (if available)
-   - Adds attributes to existing agent turn span
-   - Updates counters
-5. Ends spans (agent turn, then root)
+2. Gateway fires model_call_started → plugin opens a "chat {model}" span,
+   stashes provider/agentId on the session's active context
+3. pi-ai returns response with .usage
+4. Gateway fires model_call_ended with usage for THIS call only
+5. Plugin sets span attributes, closes the span, AND records the per-call
+   metrics (new in 0.11.0 — previously this step only touched the span)
 6. Batches and exports via OTLP
+
+Per agent turn (openclaw.llm.cost.usd only, plus the system/user/tool_result/
+skill token breakdown — core exposes no per-call price lookup anywhere else):
+1. Gateway fires the "model.usage" diagnostic event once per turn (which may
+   cover several of the per-call cycles above, e.g. in a tool-use loop)
+2. Plugin dedup-checks it against openclaw/openclaw#166289 (core is known to
+   double-dispatch this event for a subset of calls) and records cost if new
+3. Gateway also fires agent_end with the turn's messages (incl. .usage) —
+   plugin uses this to enrich the agent-turn span's attributes, no longer to
+   record metrics (that fallback was removed in 0.11.0, see below)
 ```
+
+Before 0.11.0, step 5 above only set span attributes — token/request/duration
+metrics came entirely from the agent-turn-level path, plus a disjoint-label
+fallback in the `agent_end` handler for turns where `model.usage` never fired
+at all. Both of those are gone now; see `docs/telemetry/metrics.md` for the
+full before/after and the breaking-change note.
 
 ---
 

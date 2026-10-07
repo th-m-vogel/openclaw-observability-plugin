@@ -4,6 +4,28 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0-dev](https://github.com/th-m-vogel/openclaw-observability-plugin/compare/v0.10.0...0.11.0-dev) (in progress)
+
+Dev branch (`0.11.0-dev`), not yet released — tracking status in the fork's private `STATUS.md`, live-testing on Thomas/Marvin's own installation before this ships.
+
+### ⚠ BREAKING CHANGES
+
+* **metrics:** `openclaw.llm.requests` / `openclaw.llm.tokens.total` / `.prompt` / `.completion` now record once per real model API call instead of once per agent turn, and their label set has changed accordingly (see Features below). Existing dashboards, alerts, or saved queries built against the old per-turn semantics — including this fork's own tutorial dashboard — need review before adopting this release: totals over a given time range are unaffected (same underlying token/request counts, just attributed differently), but anything that assumed "one `openclaw.llm.requests` increment == one agent turn" will now see one increment per real model call within that turn instead.
+
+### Features
+
+* **metrics:** record `openclaw.llm.requests`/`.tokens.total`/`.prompt`/`.completion`/`.errors` and the LLM duration histograms from the `model_call_started`/`model_call_ended` hook pair instead of the `model.usage` diagnostic event. This hook fires once per real model API call (not once per agent turn, which may contain several calls in a tool-use loop) and is unaffected by [openclaw/openclaw#166289](https://github.com/openclaw/openclaw/issues/166289) (core's `model.usage` event double-dispatching for a subset of calls), since it's tied to a real, individually-identified call rather than an aggregated end-of-turn event. Labeled with `gen_ai.conversation.id` + `gen_ai.provider.name` (captured at `model_call_started` time), consistent with the `model.usage`-derived cost metric's existing label schema.
+* **diagnostics:** `model.usage` dedup guard — suppresses exact-duplicate dispatches of this event (same session/model/cost/tokens, arriving ~1ms apart) within a 5-second window, so core's known double-dispatch bug ([#166289](https://github.com/openclaw/openclaw/issues/166289)) no longer double-counts the cost metric or the system/user/tool_result/skill token breakdown (the two things still recorded exclusively from this event — see Bug Fixes below for why token/request counts moved off it entirely).
+
+### Bug Fixes
+
+* **metrics:** fixed a dual-schema instrumentation split where `hooks.ts` carried its own fallback token/request recording (`agent_end`, gated on the `model.usage` diagnostic event never having fired for a turn) using a different, incompatible label set — no `gen_ai.conversation.id`, no provider — than the primary path in `diagnostics.ts`. A dashboard panel or query that filtered/grouped by `gen_ai.conversation.id` would silently miss this fallback's contribution; worst for custom/self-hosted models where `model.usage` fails to fire more often (confirmed ~19% of one such model's token volume came only through this fallback, vs <2.5% for first-party models). Removed: the new per-call path above covers every real call unconditionally, closing the gap this fallback existed to patch.
+* **metrics:** guarded the `subagent_ended` token-metric recording against double-counting if that event ever fires more than once for the same child session (previously unguarded, unlike every other usage-recording site in this plugin).
+
+### Documentation
+
+* updated the metrics reference, token-usage guide, and the "no per-LLM-call" limitation note for the new per-call metric semantics and the span-level per-call capability that already existed via `model_call_started`/`model_call_ended` (that limitation note's span claims were stale independent of this release — per-call spans have existed since ISI-926)
+
 ## [0.10.0](https://github.com/th-m-vogel/openclaw-observability-plugin/compare/v0.9.2...v0.10.0) (2026-10-04)
 
 Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`).

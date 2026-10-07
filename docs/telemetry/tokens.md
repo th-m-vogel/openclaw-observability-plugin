@@ -167,6 +167,8 @@ Adding `cache_read.input_tokens` + `cache_creation.input_tokens` + `input_tokens
 
 ## Monitoring Token Usage
 
+> **0.11.0+:** `openclaw_llm_tokens_total` (and `_prompt`/`_completion`) below now accumulate per real model API call, not per agent turn — see `docs/telemetry/metrics.md`. A turn with several tool-use round-trips (like the `cache_read`/`cache_write` example above, which is turn-level span data and unaffected by this) now contributes one metric increment per call within it, not one combined increment for the whole turn. Totals over a time range represent the same real usage either way.
+
 ### Key Metrics to Watch
 
 ```promql
