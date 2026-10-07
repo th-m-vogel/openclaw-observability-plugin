@@ -17,12 +17,17 @@ import {
   GEN_AI_OPERATION_NAME,
   GEN_AI_PROVIDER_NAME,
   GEN_AI_RESPONSE_MODEL,
+  GEN_AI_TOKEN_TYPE,
   GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
   GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
   GEN_AI_USAGE_INPUT_TOKENS,
   GEN_AI_USAGE_OUTPUT_TOKENS,
   OP_INVOKE_AGENT,
   OC_PROVIDER,
+  TOKEN_TYPE_INPUT,
+  TOKEN_TYPE_OUTPUT,
+  TOKEN_TYPE_CACHE_READ,
+  TOKEN_TYPE_CACHE_CREATION,
 } from "./semconv.js";
 
 type DiagnosticEventSource = (listener: (evt: any) => void) => () => void;
@@ -398,14 +403,21 @@ export async function registerDiagnosticsListener(
       [OC_PROVIDER]: provider,
     };
 
-    // NOTE (0.11.0): token/request/duration metrics moved to the per-call
-    // `model_call_started`/`model_call_ended` hooks in hooks.ts — this event
-    // fires once per *agent turn* (potentially many real model calls), is
-    // known to double-dispatch for a subset of calls (openclaw/openclaw#166289),
-    // and carries only the turn's final/aggregated usage, not each call's
-    // own. What's recorded here is only what's *exclusively* available on
-    // this event: cost (core has no per-call price lookup anywhere else)
-    // and the system/user/tool_result/skill token breakdown.
+    // NOTE (0.11.0): request-count and duration metrics moved to the
+    // per-call `model_call_started`/`model_call_ended` hooks in hooks.ts,
+    // which fire once per real model API call rather than once per *agent
+    // turn* like this event (a turn may cover several real calls — see a
+    // trace with several `chat {model}` spans under one `openclaw.agent.turn`
+    // for an example) and are immune to this event's known core-side
+    // double-dispatch bug (openclaw/openclaw#166289) since they're tied to
+    // a real, individually-identified call. Token counts and cost stay
+    // here — real per-call usage was investigated (0.11.0-dev) and
+    // confirmed unavailable anywhere in the plugin API today: neither
+    // `model_call_ended` (OpenClaw's own hook docs describe it as
+    // "timing, outcome, bounded request-id hashes... no response content")
+    // nor `llm_output` (same turn-aggregated numbers as this event, just a
+    // different hook) carry per-call usage. This event is the only source,
+    // so it's worth protecting against #166289 with the dedup guard below.
     const dedupKey = `${sessionKey}|${model}|${costUsd ?? "?"}|${usage.total ?? "?"}`;
     const now = Date.now();
     const lastSeen = recentUsageEvents.get(dedupKey);
@@ -418,6 +430,38 @@ export async function registerDiagnosticsListener(
     }
 
     if (!isDuplicate) {
+      if (usage.input) {
+        counters.tokensPrompt.add(usage.input, metricAttrs);
+        histograms.genAiTokenUsage.record(usage.input, {
+          ...metricAttrs,
+          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
+        });
+      }
+      if (usage.output) {
+        counters.tokensCompletion.add(usage.output, metricAttrs);
+        histograms.genAiTokenUsage.record(usage.output, {
+          ...metricAttrs,
+          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
+        });
+      }
+      if (usage.cacheRead) {
+        counters.tokensPrompt.add(usage.cacheRead, { ...metricAttrs, "token.type": "cache_read" });
+        histograms.genAiTokenUsage.record(usage.cacheRead, {
+          ...metricAttrs,
+          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
+        });
+      }
+      if (usage.cacheWrite) {
+        counters.tokensPrompt.add(usage.cacheWrite, { ...metricAttrs, "token.type": "cache_write" });
+        histograms.genAiTokenUsage.record(usage.cacheWrite, {
+          ...metricAttrs,
+          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
+        });
+      }
+      if (usage.total) {
+        counters.tokensTotal.add(usage.total, metricAttrs);
+      }
+
       // ISI-1018: Token breakdown by type (system, user, tool_result, skill)
       if (usage.system) {
         counters.tokensSystem.add(usage.system, metricAttrs);

@@ -167,7 +167,7 @@ Adding `cache_read.input_tokens` + `cache_creation.input_tokens` + `input_tokens
 
 ## Monitoring Token Usage
 
-> **0.11.0+:** `openclaw_llm_tokens_total` (and `_prompt`/`_completion`) below now accumulate per real model API call, not per agent turn — see `docs/telemetry/metrics.md`. A turn with several tool-use round-trips (like the `cache_read`/`cache_write` example above, which is turn-level span data and unaffected by this) now contributes one metric increment per call within it, not one combined increment for the whole turn. Totals over a time range represent the same real usage either way.
+> **Note:** `openclaw_llm_tokens_total` (and `_prompt`/`_completion`) below accumulate per **agent turn**, not per real model API call — a turn with several tool-use round-trips (like the `cache_read`/`cache_write` example above) contributes one combined increment covering every call in it, not one per call. This is a real limitation of OpenClaw's current plugin API, not something this plugin can improve on (see `docs/limitations.md`) — `openclaw_llm_requests`/`_duration` *are* per-call as of 0.11.0+, but tokens/cost have no per-call source to draw from.
 
 ### Key Metrics to Watch
 

@@ -214,14 +214,15 @@ describe("internal diagnostics export resolution", () => {
       usage: { input: 11, output: 5, total: 16 },
       context: { limit: 200, used: 16 },
     });
-    // 0.11.0+: token/request/duration metrics moved to the per-call
+    // 0.11.0+: request-count/duration metrics moved to the per-call
     // model_call_started/model_call_ended hooks in hooks.ts (see
-    // hooks.test.ts) — this event only still records cost (and the
-    // system/user/tool_result/skill breakdown, not exercised here), since
-    // core exposes no per-call price lookup anywhere else.
-    expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
-    expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();
-    expect(telemetry.counters.tokensTotal.add).not.toHaveBeenCalled();
+    // hooks.test.ts) — real per-call token usage was investigated and
+    // confirmed unavailable anywhere in the plugin API (see hooks.ts's
+    // model_call_ended for the full writeup), so tokens/cost stay here,
+    // from this turn-level event, same as before 0.11.0.
+    expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(11, expect.any(Object));
+    expect(telemetry.counters.tokensCompletion.add).toHaveBeenCalledWith(5, expect.any(Object));
+    expect(telemetry.counters.tokensTotal.add).toHaveBeenCalledWith(16, expect.any(Object));
     expect(telemetry.counters.llmRequests.add).not.toHaveBeenCalled();
     expect(telemetry.histograms.llmDuration.record).not.toHaveBeenCalled();
     expect(telemetry.histograms.genAiOperationDuration.record).not.toHaveBeenCalled();
