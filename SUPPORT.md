@@ -45,6 +45,10 @@ For a regression that blocks production on `0.1.x` before the EOL date, open a `
 
 The maintainers review `track/0.1` issues on a best-effort basis through **2026-10-21**.
 
+## Feature-specific version floors
+
+The table above tracks the plugin↔OpenClaw *hook API* surface (`before_agent_start` vs. `before_model_resolve`/`before_prompt_build`). Individual features can carry their own, higher floor on top of that: as of `0.11.0-dev`, real per-call `openclaw.llm.tokens.*` requires **OpenClaw `>= 2026.9.8`** (`minOpenClawVersion` in `openclaw.plugin.json`) — older installs on either track still load the plugin, just without that metric (see `docs/limitations.md`).
+
 ## Related
 
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — backport workflow and PR labeling.

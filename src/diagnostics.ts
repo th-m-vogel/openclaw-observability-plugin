@@ -308,7 +308,7 @@ export async function registerDiagnosticsListener(
   const eventSource = onInternalDiagnosticEvent || onDiagnosticEvent;
   
   if (!eventSource) {
-    logger.warn?.("[otel] No diagnostic event source available — using fallback token extraction");
+    logger.warn?.("[otel] No diagnostic event source available — openclaw.llm.tokens.* and .cost.usd will not be recorded");
     return () => {};
   }
 
@@ -457,6 +457,17 @@ export async function registerDiagnosticsListener(
     // same reliability class as the per-call request/duration hooks in
     // hooks.ts — so no fallback is needed the way `model.usage` (a
     // turn-level event) needed one. See openclaw/openclaw#166623.
+    //
+    // No dedup guard needed here against #166289 specifically: that bug
+    // is core double-dispatching the `model.usage` event itself (a
+    // separate emission site). `model.call.completed`/`model.call.error`
+    // are emitted from `emitModelCallEnded`, which core guards with its
+    // own one-shot `observer.state.terminalEventEmitted` flag per call
+    // (checked directly in OpenClaw's installed source) — a structurally
+    // different, call-scoped idempotency mechanism, not the thing #166289
+    // is about. If a *different* double-dispatch bug is ever found on
+    // these events specifically, add a guard the same way the `model.usage`
+    // handler below does (keyed on session/model/usage, not event identity).
     if (evt.type === "model.call.completed" || evt.type === "model.call.error") {
       const usage = evt.usage;
       if (!usage) return;
