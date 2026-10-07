@@ -214,16 +214,80 @@ describe("internal diagnostics export resolution", () => {
       usage: { input: 11, output: 5, total: 16 },
       context: { limit: 200, used: 16 },
     });
-    expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(11, expect.any(Object));
-    expect(telemetry.counters.tokensCompletion.add).toHaveBeenCalledWith(5, expect.any(Object));
-    expect(telemetry.counters.tokensTotal.add).toHaveBeenCalledWith(16, expect.any(Object));
-    expect(telemetry.counters.llmRequests.add).toHaveBeenCalledWith(1, expect.any(Object));
-    expect(telemetry.histograms.llmDuration.record).toHaveBeenCalledWith(123, expect.any(Object));
-    expect(telemetry.histograms.genAiOperationDuration.record).toHaveBeenCalledWith(0.123, expect.any(Object));
+    // 0.11.0+: token/request/duration metrics moved to the per-call
+    // model_call_started/model_call_ended hooks in hooks.ts (see
+    // hooks.test.ts) — this event only still records cost (and the
+    // system/user/tool_result/skill breakdown, not exercised here), since
+    // core exposes no per-call price lookup anywhere else.
+    expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensTotal.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.llmRequests.add).not.toHaveBeenCalled();
+    expect(telemetry.histograms.llmDuration.record).not.toHaveBeenCalled();
+    expect(telemetry.histograms.genAiOperationDuration.record).not.toHaveBeenCalled();
     expect(telemetry.meter.createCounter).toHaveBeenCalledWith(
       "openclaw.llm.cost.usd",
       expect.any(Object),
     );
+  });
+
+  it("suppresses an exact-duplicate model.usage dispatch (openclaw/openclaw#166289) so cost isn't double-counted", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        const payload = {
+          type: "model.usage",
+          sessionKey: "agent:main:new",
+          provider: "ionos",
+          model: "Qwen/Qwen3.5-397B-A17B",
+          usage: { input: 226167, output: 3738, total: 229905 },
+          costUsd: 0.1666,
+          durationMs: 96700,
+        };
+        listener(payload);
+        listener({ ...payload }); // core double-dispatches for a subset of calls
+        return () => undefined;
+      }\n`,
+    );
+    const logger = createLogger();
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), logger, telemetry);
+
+    // Cost is only recorded once, even though the event fired twice.
+    const costCounter = telemetry.meter.createCounter.mock.results[0]?.value;
+    expect(telemetry.meter.createCounter).toHaveBeenCalledTimes(1);
+    expect(costCounter.add).toHaveBeenCalledTimes(1);
+    expect(costCounter.add).toHaveBeenCalledWith(0.1666, expect.any(Object));
+
+    // The second, duplicate dispatch is logged, not silently dropped.
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining("suppressed duplicate dispatch"),
+    );
+  });
+
+  it("does not suppress two genuinely distinct model.usage events for the same session", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.usage", sessionKey: "agent:main:new", provider: "ionos",
+          model: "Qwen/Qwen3.5-397B-A17B", usage: { total: 1000 }, costUsd: 0.01,
+        });
+        listener({
+          type: "model.usage", sessionKey: "agent:main:new", provider: "ionos",
+          model: "Qwen/Qwen3.5-397B-A17B", usage: { total: 2000 }, costUsd: 0.02,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.meter.createCounter).toHaveBeenCalledTimes(2);
   });
 
   it("ignores non-function direct exports", async () => {

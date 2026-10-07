@@ -72,6 +72,10 @@ export interface LegacyTraceContext {
   llmStartTime?: number;
   modelCallSpan?: Span;
   modelCallStartTime?: number;
+  /** Request-side attrs captured at `model_call_started`, needed again at
+   *  `model_call_ended` to label per-call metrics. */
+  modelCallProvider?: string;
+  modelCallAgentId?: string;
   dispatchSpan?: Span;
   dispatchStartTime?: number;
   activeToolSpans?: Map<string, ActiveToolSpan>;

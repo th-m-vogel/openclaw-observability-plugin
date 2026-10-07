@@ -158,6 +158,7 @@ function createTelemetry(): { telemetry: TelemetryRuntime; spans: Array<Span & S
       agentTurnDuration: noopHistogram(),
       genAiTokenUsage: noopHistogram(),
       genAiOperationDuration: noopHistogram(),
+      llmDuration: noopHistogram(),
       toolCallDuration: noopHistogram(),
       cronDuration: noopHistogram(),
       subagentDuration: noopHistogram(),
@@ -692,6 +693,70 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
     expect(chatSpan!.attrs["gen_ai.usage.cache_creation.input_tokens"]).toBe(20);
     expect(chatSpan!.attrs["gen_ai.usage.total_tokens"]).toBeUndefined();
     expect(chatSpan!.ended).toBe(true);
+
+    stopHooks();
+  });
+
+  it("model_call_ended records per-call token/request metrics labeled with conversation id + provider (0.11.0+)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const modelStarted = typedHooks.get("model_call_started")!;
+    const modelEnded = typedHooks.get("model_call_ended")!;
+
+    resolve({}, { agentId: "main", sessionKey: "agent:main:new" });
+    modelStarted(
+      { sessionKey: "agent:main:new", model: "Qwen/Qwen3.5-397B-A17B", provider: "ionos", agentId: "main" },
+      { sessionKey: "agent:main:new" },
+    );
+    modelEnded(
+      {
+        sessionKey: "agent:main:new",
+        responseModel: "Qwen/Qwen3.5-397B-A17B",
+        usage: { input: 40969, output: 369, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+        durationMs: 2500,
+      },
+      { sessionKey: "agent:main:new" },
+    );
+
+    const expectedAttrs = expect.objectContaining({
+      "gen_ai.response.model": "Qwen/Qwen3.5-397B-A17B",
+      "gen_ai.conversation.id": "agent:main:new",
+      "gen_ai.provider.name": "ionos",
+      "openclaw.provider": "ionos",
+    });
+    expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(40969, expectedAttrs);
+    expect(telemetry.counters.tokensCompletion.add).toHaveBeenCalledWith(369, expectedAttrs);
+    expect(telemetry.counters.tokensTotal.add).toHaveBeenCalledWith(40969 + 369, expectedAttrs);
+    expect(telemetry.counters.llmRequests.add).toHaveBeenCalledWith(1, expectedAttrs);
+    expect(telemetry.histograms.llmDuration.record).toHaveBeenCalledWith(2500, expectedAttrs);
+    expect(telemetry.histograms.genAiOperationDuration.record).toHaveBeenCalledWith(2.5, expectedAttrs);
+
+    stopHooks();
+  });
+
+  it("model_call_ended records llmErrors on the new per-call path when event.error is set", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const modelStarted = typedHooks.get("model_call_started")!;
+    const modelEnded = typedHooks.get("model_call_ended")!;
+
+    resolve({}, { agentId: "main", sessionKey: "s-err" });
+    modelStarted(
+      { sessionKey: "s-err", model: "claude-3.5-sonnet", provider: "anthropic", agentId: "main" },
+      { sessionKey: "s-err" },
+    );
+    modelEnded(
+      { sessionKey: "s-err", responseModel: "claude-3.5-sonnet", error: "boom", usage: { input: 10, output: 0 } },
+      { sessionKey: "s-err" },
+    );
+
+    expect(telemetry.counters.llmErrors.add).toHaveBeenCalledWith(1, expect.any(Object));
 
     stopHooks();
   });

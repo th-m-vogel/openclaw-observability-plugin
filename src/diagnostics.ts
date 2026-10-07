@@ -17,17 +17,12 @@ import {
   GEN_AI_OPERATION_NAME,
   GEN_AI_PROVIDER_NAME,
   GEN_AI_RESPONSE_MODEL,
-  GEN_AI_TOKEN_TYPE,
   GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
   GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
   GEN_AI_USAGE_INPUT_TOKENS,
   GEN_AI_USAGE_OUTPUT_TOKENS,
   OP_INVOKE_AGENT,
   OC_PROVIDER,
-  TOKEN_TYPE_INPUT,
-  TOKEN_TYPE_OUTPUT,
-  TOKEN_TYPE_CACHE_READ,
-  TOKEN_TYPE_CACHE_CREATION,
 } from "./semconv.js";
 
 type DiagnosticEventSource = (listener: (evt: any) => void) => () => void;
@@ -203,6 +198,19 @@ interface PendingUsageData {
 
 /** Map of sessionKey → pending usage data from diagnostic events */
 const pendingUsageMap = new Map<string, PendingUsageData>();
+
+/**
+ * Dedup guard against openclaw/openclaw#166289 — core double-dispatches the
+ * `model.usage` diagnostic event for a subset of calls (confirmed core-side,
+ * not caused by this plugin). Keyed on content, not identity, since the two
+ * dispatches are otherwise byte-identical and arrive ~1ms apart. Only needs
+ * to protect what's *exclusively* recorded from this event (cost, and the
+ * system/user/tool_result/skill token breakdown) — the primary token/request
+ * metrics now come from the per-call `model_call_started`/`model_call_ended`
+ * hooks in hooks.ts, which are tied to a real call and unaffected by this.
+ */
+const recentUsageEvents = new Map<string, number>();
+const DUPLICATE_WINDOW_MS = 5_000;
 
 /** Map of sessionKey → active agent span (set by hooks.ts) */
 export const activeAgentSpans = new Map<string, Span>();
@@ -380,7 +388,6 @@ export async function registerDiagnosticsListener(
       model,
     });
 
-    // Record metrics immediately (don't wait for span).
     // Stable GenAI attribute keys only — `gen_ai.system` dropped in schema
     // 1.3.0 (ISI-1004). `openclaw.provider` (legacy mirror) is retained.
     const metricAttrs = {
@@ -391,69 +398,55 @@ export async function registerDiagnosticsListener(
       [OC_PROVIDER]: provider,
     };
 
-    if (usage.input) {
-      counters.tokensPrompt.add(usage.input, metricAttrs);
-      histograms.genAiTokenUsage.record(usage.input, {
-        ...metricAttrs,
-        [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
-      });
-    }
-    if (usage.output) {
-      counters.tokensCompletion.add(usage.output, metricAttrs);
-      histograms.genAiTokenUsage.record(usage.output, {
-        ...metricAttrs,
-        [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
-      });
-    }
-    if (usage.cacheRead) {
-      counters.tokensPrompt.add(usage.cacheRead, { ...metricAttrs, "token.type": "cache_read" });
-      histograms.genAiTokenUsage.record(usage.cacheRead, {
-        ...metricAttrs,
-        [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
-      });
-    }
-    if (usage.cacheWrite) {
-      counters.tokensPrompt.add(usage.cacheWrite, { ...metricAttrs, "token.type": "cache_write" });
-      histograms.genAiTokenUsage.record(usage.cacheWrite, {
-        ...metricAttrs,
-        [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
-      });
-    }
-    if (usage.total) {
-      counters.tokensTotal.add(usage.total, metricAttrs);
+    // NOTE (0.11.0): token/request/duration metrics moved to the per-call
+    // `model_call_started`/`model_call_ended` hooks in hooks.ts — this event
+    // fires once per *agent turn* (potentially many real model calls), is
+    // known to double-dispatch for a subset of calls (openclaw/openclaw#166289),
+    // and carries only the turn's final/aggregated usage, not each call's
+    // own. What's recorded here is only what's *exclusively* available on
+    // this event: cost (core has no per-call price lookup anywhere else)
+    // and the system/user/tool_result/skill token breakdown.
+    const dedupKey = `${sessionKey}|${model}|${costUsd ?? "?"}|${usage.total ?? "?"}`;
+    const now = Date.now();
+    const lastSeen = recentUsageEvents.get(dedupKey);
+    const isDuplicate = typeof lastSeen === "number" && now - lastSeen < DUPLICATE_WINDOW_MS;
+    recentUsageEvents.set(dedupKey, now);
+    if (recentUsageEvents.size > 500) {
+      for (const [k, ts] of recentUsageEvents) {
+        if (now - ts > DUPLICATE_WINDOW_MS) recentUsageEvents.delete(k);
+      }
     }
 
-    // ISI-1018: Token breakdown by type (system, user, tool_result, skill)
-    if (usage.system) {
-      counters.tokensSystem.add(usage.system, metricAttrs);
-    }
-    if (usage.user) {
-      counters.tokensUser.add(usage.user, metricAttrs);
-    }
-    if (usage.toolResult) {
-      counters.tokensToolResult.add(usage.toolResult, metricAttrs);
-    }
-    if (usage.skill) {
-      counters.tokensSkill.add(usage.skill, metricAttrs);
+    if (!isDuplicate) {
+      // ISI-1018: Token breakdown by type (system, user, tool_result, skill)
+      if (usage.system) {
+        counters.tokensSystem.add(usage.system, metricAttrs);
+      }
+      if (usage.user) {
+        counters.tokensUser.add(usage.user, metricAttrs);
+      }
+      if (usage.toolResult) {
+        counters.tokensToolResult.add(usage.toolResult, metricAttrs);
+      }
+      if (usage.skill) {
+        counters.tokensSkill.add(usage.skill, metricAttrs);
+      }
+
+      // Record cost metric
+      if (typeof costUsd === "number" && costUsd > 0) {
+        telemetry.meter.createCounter("openclaw.llm.cost.usd", {
+          description: "Estimated LLM cost in USD",
+          unit: "usd",
+        }).add(costUsd, metricAttrs);
+      }
+    } else {
+      logger.debug?.(
+        `[otel] model.usage: suppressed duplicate dispatch (openclaw/openclaw#166289) for session=${sessionKey}, cost=$${costUsd?.toFixed(4) || "?"}, tokens=${usage.total || "?"}`
+      );
     }
 
-    // Record cost metric
-    if (typeof costUsd === "number" && costUsd > 0) {
-      telemetry.meter.createCounter("openclaw.llm.cost.usd", {
-        description: "Estimated LLM cost in USD",
-        unit: "usd",
-      }).add(costUsd, metricAttrs);
-    }
-
-    // Record LLM duration — legacy (ms) and stable GenAI (seconds).
-    if (typeof evt.durationMs === "number") {
-      histograms.llmDuration.record(evt.durationMs, metricAttrs);
-      histograms.genAiOperationDuration.record(evt.durationMs / 1000, metricAttrs);
-    }
-
-    counters.llmRequests.add(1, metricAttrs);
-
-    // If we have an active agent span for this session, enrich it now
+    // Span enrichment overwrites the same attributes either way, so it's
+    // safe to run regardless of the dedup check above.
     const agentSpan = activeAgentSpans.get(sessionKey);
     if (agentSpan) {
       enrichSpanWithUsage(agentSpan, evt);
