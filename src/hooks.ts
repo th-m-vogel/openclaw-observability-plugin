@@ -83,6 +83,7 @@ import {
   TOKEN_TYPE_OUTPUT,
   TOKEN_TYPE_CACHE_READ,
   TOKEN_TYPE_CACHE_CREATION,
+  OC_PROVIDER,
   CODE_FUNCTION_NAME,
   CODE_FILE_PATH,
   ERROR_TYPE,
@@ -1108,6 +1109,8 @@ export function registerHooks(
         if (sessionCtx) {
           sessionCtx.modelCallSpan = span;
           sessionCtx.modelCallStartTime = Date.now();
+          sessionCtx.modelCallProvider = provider;
+          sessionCtx.modelCallAgentId = agentId;
 
           if (sessionCtx.agentSpan) {
             if (provider && provider !== "unknown") {
@@ -1222,9 +1225,86 @@ export function registerHooks(
           span.setStatus({ code: SpanStatusCode.OK });
         }
 
+        const provider = sessionCtx?.modelCallProvider;
+        const callAgentId = sessionCtx?.modelCallAgentId;
+
         span.end();
         sessionCtx!.modelCallSpan = undefined;
         sessionCtx!.modelCallStartTime = undefined;
+        sessionCtx!.modelCallProvider = undefined;
+        sessionCtx!.modelCallAgentId = undefined;
+
+        // Per-call token/request metrics (0.11.0+), in their own try/catch
+        // so a problem here (e.g. a telemetry field missing) can never
+        // prevent the span above from closing. Fires once per real model
+        // API call, independent of `traces`/`metrics` config — the OTel
+        // no-op meter absorbs calls when metrics are disabled, so no config
+        // check is needed here. Unlike the `model.usage` diagnostic event
+        // this plugin also consumes (see diagnostics.ts), this hook is tied
+        // 1:1 to a single completed call rather than an aggregated,
+        // duplicate-prone end-of-turn event, and works without `traces`
+        // enabled since it doesn't depend on span export succeeding — only
+        // on `model_call_started` having stored request-side context.
+        try {
+          const tel = getTelemetry();
+          if (tel) {
+            const { counters, histograms } = tel;
+            const metricAttrs: Record<string, string> = {
+              [GEN_AI_RESPONSE_MODEL]: responseModel,
+              [GEN_AI_OPERATION_NAME]: OP_CHAT,
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+            };
+            if (provider && provider !== "unknown") {
+              metricAttrs[GEN_AI_PROVIDER_NAME] = provider;
+              metricAttrs[OC_PROVIDER] = provider;
+            }
+            if (callAgentId && callAgentId !== "unknown") {
+              metricAttrs[GEN_AI_AGENT_ID] = callAgentId;
+            }
+
+            if (inputTokens > 0) {
+              counters.tokensPrompt.add(inputTokens, metricAttrs);
+              histograms.genAiTokenUsage.record(inputTokens, {
+                ...metricAttrs,
+                [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
+              });
+            }
+            if (outputTokens > 0) {
+              counters.tokensCompletion.add(outputTokens, metricAttrs);
+              histograms.genAiTokenUsage.record(outputTokens, {
+                ...metricAttrs,
+                [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
+              });
+            }
+            if (cacheReadInputTokens > 0) {
+              counters.tokensPrompt.add(cacheReadInputTokens, { ...metricAttrs, "token.type": "cache_read" });
+              histograms.genAiTokenUsage.record(cacheReadInputTokens, {
+                ...metricAttrs,
+                [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
+              });
+            }
+            if (cacheCreationInputTokens > 0) {
+              counters.tokensPrompt.add(cacheCreationInputTokens, { ...metricAttrs, "token.type": "cache_write" });
+              histograms.genAiTokenUsage.record(cacheCreationInputTokens, {
+                ...metricAttrs,
+                [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
+              });
+            }
+            const totalTokens = inputTokens + outputTokens + cacheReadInputTokens + cacheCreationInputTokens;
+            if (totalTokens > 0) {
+              counters.tokensTotal.add(totalTokens, metricAttrs);
+            }
+            counters.llmRequests.add(1, metricAttrs);
+            if (errorMsg) {
+              counters.llmErrors.add(1, metricAttrs);
+            }
+            if (typeof durationMs === "number") {
+              histograms.llmDuration.record(durationMs, metricAttrs);
+              histograms.genAiOperationDuration.record(durationMs / 1000, metricAttrs);
+            }
+          }
+        } catch {
+        }
       } catch {
       }
 
@@ -2026,7 +2106,6 @@ export function registerHooks(
           }
         }
 
-        const totalTokens = totalInputTokens + totalOutputTokens + cacheReadTokens + cacheWriteTokens;
         logger.debug?.(`[otel] agent_end tokens: input=${totalInputTokens}, output=${totalOutputTokens}, cache_read=${cacheReadTokens}, cache_write=${cacheWriteTokens}, model=${model}`);
 
         const sessionCtx = store.getActiveContext(sessionKey);
@@ -2174,42 +2253,19 @@ export function registerHooks(
             agentSpan.setAttribute("openclaw.context.used", diagUsage.context.used);
           }
 
-          // Record metrics only if we didn't get them from diagnostics
-          // (diagnostics module already records metrics on model.usage event)
-          if (!diagUsage && (totalInputTokens > 0 || totalOutputTokens > 0)) {
-            const metricAttrs = {
-              [GEN_AI_RESPONSE_MODEL]: model,
-              [GEN_AI_OPERATION_NAME]: OP_INVOKE_AGENT,
-              [GEN_AI_AGENT_ID]: agentId,
-              "openclaw.agent.id": agentId,
-            };
-            counters.tokensPrompt.add(totalInputTokens + cacheReadTokens + cacheWriteTokens, metricAttrs);
-            counters.tokensCompletion.add(totalOutputTokens, metricAttrs);
-            counters.tokensTotal.add(totalTokens, metricAttrs);
-            counters.llmRequests.add(1, metricAttrs);
-
-            // Stable GenAI token usage histogram (per gen_ai.token.type)
-            histograms.genAiTokenUsage.record(totalInputTokens, {
-              ...metricAttrs,
-              [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
-            });
-            histograms.genAiTokenUsage.record(totalOutputTokens, {
-              ...metricAttrs,
-              [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
-            });
-            if (cacheReadTokens > 0) {
-              histograms.genAiTokenUsage.record(cacheReadTokens, {
-                ...metricAttrs,
-                [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
-              });
-            }
-            if (cacheWriteTokens > 0) {
-              histograms.genAiTokenUsage.record(cacheWriteTokens, {
-                ...metricAttrs,
-                [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
-              });
-            }
-          }
+          // NOTE (0.11.0): this used to be a fallback that recorded
+          // tokensPrompt/tokensCompletion/tokensTotal/llmRequests here,
+          // labeled with only `gen_ai.agent.id` (no conversation id, no
+          // provider), whenever the `model.usage` diagnostic event hadn't
+          // fired for this turn. That created two disjoint label schemas on
+          // the same metric names — a `sum()` without awareness of both
+          // would silently miss this fallback's contribution whenever a
+          // dashboard filtered/grouped by `gen_ai.conversation.id`. Removed:
+          // token/request metrics now come unconditionally from the
+          // per-call `model_call_started`/`model_call_ended` hooks above,
+          // which fire on every real call regardless of whether this
+          // turn-level diagnostic event ever arrives — so there's no gap
+          // left for this fallback to fill, and one consistent schema.
 
           // Record duration histograms — legacy (ms) and stable GenAI (s).
           if (typeof durationMs === "number") {
@@ -2459,6 +2515,16 @@ export function registerHooks(
   // `subagent_ended`, with a size-bounded backstop against a missing end event.
   const orphanSubagentSpans = new Map<string, { span: Span; startTime: number }>();
   const ORPHAN_SPAWN_SPAN_CAP = 256;
+
+  /**
+   * Guards the `subagent_ended` token-metric recording below against
+   * recording the same child session's usage twice if the event ever
+   * fires more than once for it (no dedup existed here previously — unlike
+   * the `model.usage` path, which now has one against openclaw/openclaw#166289).
+   * One-shot: a given subagent session only ever ends once.
+   */
+  const finalizedSubagentSessions = new Set<string>();
+  const FINALIZED_SUBAGENT_CAP = 1000;
 
   /** Apply the `subagent_spawned`-only resolved fields to a spawn span. */
   function applyResolvedSubagentFields(
@@ -2741,8 +2807,15 @@ export function registerHooks(
             [GEN_AI_RESPONSE_MODEL]: model,
           });
 
-          // ISI-1019: Record token usage metrics for subagent
-          if (totalTokens > 0) {
+          // ISI-1019: Record token usage metrics for subagent — guarded
+          // against double-recording if this event ever fires twice for
+          // the same child session (see `finalizedSubagentSessions` above).
+          if (totalTokens > 0 && !finalizedSubagentSessions.has(childSessionKey)) {
+            finalizedSubagentSessions.add(childSessionKey);
+            if (finalizedSubagentSessions.size > FINALIZED_SUBAGENT_CAP) {
+              const oldest = finalizedSubagentSessions.values().next().value;
+              if (oldest !== undefined) finalizedSubagentSessions.delete(oldest);
+            }
             const metricAttrs = {
               [OC_SUBAGENT_CHILD_AGENT_NAME]: childAgentName,
               [GEN_AI_RESPONSE_MODEL]: model,
