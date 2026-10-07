@@ -220,13 +220,16 @@ describe("internal diagnostics export resolution", () => {
     });
     // 0.11.0+: request-count/duration metrics moved to the per-call
     // model_call_started/model_call_ended hooks in hooks.ts (see
-    // hooks.test.ts) — real per-call token usage was investigated and
-    // confirmed unavailable anywhere in the plugin API (see hooks.ts's
-    // model_call_ended for the full writeup), so tokens/cost stay here,
-    // from this turn-level event, same as before 0.11.0.
-    expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(11, expect.any(Object));
-    expect(telemetry.counters.tokensCompletion.add).toHaveBeenCalledWith(5, expect.any(Object));
-    expect(telemetry.counters.tokensTotal.add).toHaveBeenCalledWith(16, expect.any(Object));
+    // hooks.test.ts). 0.12.0+: openclaw.llm.tokens.* also moved to a
+    // per-call source — not this hook (confirmed to carry no usage), but
+    // the sibling model.call.completed/model.call.error *diagnostic
+    // events*, a different mechanism (openclaw/openclaw#166623) — see the
+    // "model.call.completed / model.call.error" describe block below.
+    // Cost stays here, on this turn-level event — no per-call cost field
+    // exists anywhere in OpenClaw's plugin API.
+    expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensTotal.add).not.toHaveBeenCalled();
     expect(telemetry.counters.llmRequests.add).not.toHaveBeenCalled();
     expect(telemetry.histograms.llmDuration.record).not.toHaveBeenCalled();
     expect(telemetry.histograms.genAiOperationDuration.record).not.toHaveBeenCalled();
@@ -306,6 +309,105 @@ describe("internal diagnostics export resolution", () => {
     expect(logger.debug).toHaveBeenCalledWith(
       expect.stringContaining("loaded but onInternalDiagnosticEvent export not resolved"),
     );
+  });
+});
+
+describe("model.call.completed / model.call.error diagnostic events", () => {
+  it("records real per-call token metrics from model.call.completed, labeled with conversation id + provider + agent id", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.call.completed",
+          sessionKey: "agent:main:new",
+          provider: "ionos",
+          model: "Qwen/Qwen3.5-397B-A17B",
+          agentId: "main",
+          usage: { input: 1000, output: 200, cacheRead: 500, cacheWrite: 50, total: 1250 },
+          durationMs: 850,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    const baseAttrs = {
+      "gen_ai.response.model": "Qwen/Qwen3.5-397B-A17B",
+      "gen_ai.operation.name": "chat",
+      "gen_ai.conversation.id": "agent:main:new",
+      "gen_ai.provider.name": "ionos",
+      "openclaw.provider": "ionos",
+      "gen_ai.agent.id": "main",
+    };
+    expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(
+      1000,
+      expect.objectContaining(baseAttrs),
+    );
+    expect(telemetry.counters.tokensCompletion.add).toHaveBeenCalledWith(
+      200,
+      expect.objectContaining(baseAttrs),
+    );
+    expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(
+      500,
+      expect.objectContaining({ ...baseAttrs, "token.type": "cache_read" }),
+    );
+    expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(
+      50,
+      expect.objectContaining({ ...baseAttrs, "token.type": "cache_write" }),
+    );
+    expect(telemetry.counters.tokensTotal.add).toHaveBeenCalledWith(
+      1250,
+      expect.objectContaining(baseAttrs),
+    );
+  });
+
+  it("records tokens from a model.call.error event when usage is present (provider billed tokens before erroring)", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.call.error",
+          sessionKey: "agent:main:err",
+          provider: "anthropic",
+          model: "claude-3.5-sonnet",
+          usage: { input: 300, output: 0, total: 300 },
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(300, expect.any(Object));
+    expect(telemetry.counters.tokensTotal.add).toHaveBeenCalledWith(300, expect.any(Object));
+  });
+
+  it("does not record token metrics when model.call.completed carries no usage field", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.call.completed",
+          sessionKey: "agent:main:nousage",
+          provider: "anthropic",
+          model: "claude-3.5-sonnet",
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensTotal.add).not.toHaveBeenCalled();
   });
 });
 
