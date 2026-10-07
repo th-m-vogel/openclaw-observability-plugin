@@ -1171,7 +1171,7 @@ export function registerHooks(
         // `openclaw.agent.turn`/`model.usage` all report the same
         // turn-aggregated numbers, not per-call ones. Filed upstream:
         // openclaw/openclaw — "expose real per-call token usage on
-        // model_call_ended" (see STATUS.md for the issue link once filed).
+        // model_call_ended" — filed as openclaw/openclaw#166623.
         const usage = event?.usage || {};
         const inputTokens =
           usage.input ?? usage.inputTokens ?? usage.input_tokens ?? 0;

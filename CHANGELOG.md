@@ -10,7 +10,7 @@ Dev branch (`0.11.0-dev`), not yet released — tracking status in the fork's pr
 
 This went through two passes. The first attempted to move token/request/duration metrics onto the `model_call_started`/`model_call_ended` hook pair for real per-call granularity, on the premise that this hook carries real per-call `usage` data. Live-testing disproved that premise: this hook's real event payload has no `usage` field at all (confirmed both by capturing the actual event shape in production and by OpenClaw's own hook-reference docs, which describe this pair as "timing, outcome, bounded request-id hashes... no response content" — deliberate, not a bug). Neither does `llm_output`, the only other hook with a documented `usage` field: it reports the same turn-aggregated numbers as `model.usage`, not real per-call ones. **Real per-call token usage does not exist anywhere in OpenClaw's plugin API today.** What shipped below is the second, scoped-down pass: keep what's genuinely per-call and real (request count, duration), revert what wasn't (tokens, which stay turn-level, same as pre-0.11.0), and fix the schema bug the simple way instead.
 
-A feature request asking OpenClaw core to expose real per-call usage has been filed upstream — see `STATUS.md` for the issue link once filed. Realistically, don't expect it soon; this plugin does the best it can with what core currently gives it.
+A feature request asking OpenClaw core to expose real per-call usage has been filed upstream as [openclaw/openclaw#166623](https://github.com/openclaw/openclaw/issues/166623). Realistically, don't expect it soon; this plugin does the best it can with what core currently gives it.
 
 ### Features
 
