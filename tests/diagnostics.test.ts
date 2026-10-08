@@ -275,6 +275,34 @@ describe("internal diagnostics export resolution", () => {
     );
   });
 
+  it("suppresses a duplicate dispatch even when its recomputed cost differs only in floating-point noise", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.usage", sessionKey: "agent:main:ionos-twt", provider: "openai",
+          model: "gpt-5.6-luna", usage: { total: 287134 }, costUsd: 0.05110000000001,
+        });
+        listener({
+          type: "model.usage", sessionKey: "agent:main:ionos-twt", provider: "openai",
+          model: "gpt-5.6-luna", usage: { total: 287134 }, costUsd: 0.05109999999998,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const logger = createLogger();
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), logger, telemetry);
+
+    const costCounter = telemetry.meter.createCounter.mock.results[0]?.value;
+    expect(costCounter.add).toHaveBeenCalledTimes(1);
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining("suppressed duplicate dispatch"),
+    );
+  });
+
   it("does not suppress two genuinely distinct model.usage events for the same session", async () => {
     const root = makeInstallRoot();
     writeChunk(

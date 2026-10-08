@@ -570,7 +570,15 @@ export async function registerDiagnosticsListener(
     // system/user/tool_result/skill breakdown (not present in per-call
     // usage either). Both still need the dedup guard below, since this
     // event can still double-dispatch (#166289).
-    const dedupKey = `${sessionKey}|${model}|${costUsd ?? "?"}|${usage.total ?? "?"}`;
+    // Round cost/tokens before keying the dedup map: a duplicate dispatch
+    // can recompute cost with a tiny floating-point difference (identical
+    // at the precision the debug log below displays, different in full
+    // precision), which would otherwise defeat this guard entirely — found
+    // live on a gpt-5.6-luna session where an exact-looking duplicate
+    // ($0.0511 both times) was never caught, double-counting its cost.
+    const costKey = typeof costUsd === "number" ? costUsd.toFixed(4) : "?";
+    const totalKey = typeof usage.total === "number" ? Math.round(usage.total) : "?";
+    const dedupKey = `${sessionKey}|${model}|${costKey}|${totalKey}`;
     const now = Date.now();
     const lastSeen = recentUsageEvents.get(dedupKey);
     const isDuplicate = typeof lastSeen === "number" && now - lastSeen < DUPLICATE_WINDOW_MS;
