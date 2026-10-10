@@ -1,93 +1,34 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("plugin service lifecycle", () => {
-  const pluginMgmtSubcommands = ["install", "inspect", "doctor", "list", "uninstall", "update"] as const;
-
   afterEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
   });
 
-  it.each(pluginMgmtSubcommands)(
-    "skips long-lived init during plugin-management CLI %s",
-    async (subcommand) => {
-      vi.resetModules();
-
-      const originalArgv = [...process.argv];
-      process.argv = [originalArgv[0] ?? "node", originalArgv[1] ?? "openclaw", "plugins", subcommand];
-
-      const initTelemetry = vi.fn();
-      const registerHooks = vi.fn();
-      const registerDiagnosticsListener = vi.fn().mockResolvedValue(() => {});
-      const initLogPipeline = vi.fn(() => null);
-
-      vi.doMock("../src/telemetry.js", () => ({
-        initTelemetry,
-        hasPreloadedOtelSdk: vi.fn(() => false),
-      }));
-      vi.doMock("../src/openllmetry.js", () => ({
-        initOpenLLMetry: vi.fn(),
-      }));
-      vi.doMock("../src/hooks.js", () => ({
-        registerHooks,
-      }));
-      vi.doMock("../src/diagnostics.js", () => ({
-        registerDiagnosticsListener,
-        hasDiagnosticsSupport: vi.fn(() => true),
-      }));
-      vi.doMock("../src/logs.js", () => ({
-        initLogPipeline,
-        bridgeGatewayLogger: vi.fn(),
-      }));
-
-      const api = {
-        logger: {
-          debug: vi.fn(),
-          info: vi.fn(),
-          warn: vi.fn(),
-          error: vi.fn(),
-        },
-        pluginConfig: {
-          endpoint: "http://127.0.0.1:14318",
-          traces: true,
-          metrics: true,
-          // ISI-1710: exercise the real default (logs on) so the guard is
-          // proven to skip the long-lived OTLP log pipeline too, not just
-          // telemetry/hooks.
-          logs: true,
-        },
-        registerGatewayMethod: vi.fn(),
-        registerCli: vi.fn(),
-        registerService: vi.fn(),
-        registerTool: vi.fn(),
-        on: vi.fn(),
-      };
-
-      try {
-        const plugin = (await import("../index.js")).default;
-        plugin.register(api);
-        await Promise.resolve();
-      } finally {
-        process.argv = originalArgv;
-      }
-
-      expect(initTelemetry).not.toHaveBeenCalled();
-      expect(registerHooks).not.toHaveBeenCalled();
-      expect(registerDiagnosticsListener).not.toHaveBeenCalled();
-      expect(initLogPipeline).not.toHaveBeenCalled();
-      expect(api.logger.info).toHaveBeenCalledWith(
-        "[otel] Plugin-management context - hooks skipped, CLI will exit cleanly",
-      );
-    },
-  );
-
-  it("skips long-lived init during `openclaw completion --write-state`", async () => {
+  // ISI-1900 (openclaw/openclaw#166289): register()'s heavy init is gated
+  // on api.registrationMode === "full", the authoritative signal OpenClaw
+  // core already provides on every register() call — replacing the former
+  // argv-based isPluginMgmtContext() heuristic, which couldn't recognize a
+  // non-full load with no distinguishing argv at all (the actual mechanism
+  // behind #166289's duplicate model.usage dispatch). Empirically confirmed
+  // live (2026-10-10, see STATUS.md) against a real OpenClaw install: every
+  // one of these modes is what the named real command actually reports.
+  async function registerWithMode(params: { registrationMode?: string; argv?: string[] }) {
     vi.resetModules();
 
     const originalArgv = [...process.argv];
-    process.argv = [originalArgv[0] ?? "node", originalArgv[1] ?? "openclaw", "completion", "--write-state"];
+    if (params.argv) {
+      process.argv = [originalArgv[0] ?? "node", originalArgv[1] ?? "openclaw", ...params.argv];
+    }
 
-    const initTelemetry = vi.fn();
+    // initTelemetry must return a truthy value — register()'s diagnostics
+    // subscription is additionally gated on `telemetry` being truthy
+    // (`if (telemetry && !skipLongLivedInit)`), so a bare vi.fn() (which
+    // returns undefined) would make registerDiagnosticsListener never get
+    // called regardless of the registrationMode gate under test, masking
+    // what this test block is actually trying to prove.
+    const initTelemetry = vi.fn(() => ({ shutdown: vi.fn().mockResolvedValue(undefined) }));
     const registerHooks = vi.fn();
     const registerDiagnosticsListener = vi.fn().mockResolvedValue(() => {});
     const initLogPipeline = vi.fn(() => null);
@@ -111,7 +52,7 @@ describe("plugin service lifecycle", () => {
       bridgeGatewayLogger: vi.fn(),
     }));
 
-    const api = {
+    const api: Record<string, unknown> = {
       logger: {
         debug: vi.fn(),
         info: vi.fn(),
@@ -122,6 +63,9 @@ describe("plugin service lifecycle", () => {
         endpoint: "http://127.0.0.1:14318",
         traces: true,
         metrics: true,
+        // ISI-1710: exercise the real default (logs on) so the guard is
+        // proven to skip the long-lived OTLP log pipeline too, not just
+        // telemetry/hooks.
         logs: true,
       },
       registerGatewayMethod: vi.fn(),
@@ -130,6 +74,9 @@ describe("plugin service lifecycle", () => {
       registerTool: vi.fn(),
       on: vi.fn(),
     };
+    if (params.registrationMode !== undefined) {
+      api.registrationMode = params.registrationMode;
+    }
 
     try {
       const plugin = (await import("../index.js")).default;
@@ -139,13 +86,72 @@ describe("plugin service lifecycle", () => {
       process.argv = originalArgv;
     }
 
+    return { api, initTelemetry, registerHooks, registerDiagnosticsListener, initLogPipeline };
+  }
+
+  // Named after the real commands each registrationMode was empirically
+  // confirmed (2026-10-10, live host, see STATUS.md) to actually report —
+  // two of three differ from what core's own docs/test-file naming alone
+  // would have suggested, which is exactly why this was tested live rather
+  // than assumed.
+  const confirmedNonFullCases = [
+    { command: "plugins doctor", registrationMode: "discovery" },
+    { command: "plugins inspect --runtime --json", registrationMode: "tool-discovery" },
+    { command: "completion --write-state", registrationMode: "discovery" },
+  ] as const;
+
+  it.each(confirmedNonFullCases)(
+    "skips long-lived init for $command (registrationMode: $registrationMode)",
+    async ({ registrationMode }) => {
+      const { initTelemetry, registerHooks, registerDiagnosticsListener, initLogPipeline, api } =
+        await registerWithMode({ registrationMode });
+
+      expect(initTelemetry).not.toHaveBeenCalled();
+      expect(registerHooks).not.toHaveBeenCalled();
+      expect(registerDiagnosticsListener).not.toHaveBeenCalled();
+      expect(initLogPipeline).not.toHaveBeenCalled();
+      expect((api.logger as { info: ReturnType<typeof vi.fn> }).info).toHaveBeenCalledWith(
+        `[otel] Non-full registration (${registrationMode}) detected — skipping telemetry init`,
+      );
+    },
+  );
+
+  it("skips long-lived init for `plugins install` via the argv fallback (no safe live test exists for this command)", async () => {
+    const { initTelemetry, registerHooks, registerDiagnosticsListener, initLogPipeline } =
+      await registerWithMode({ argv: ["plugins", "install"] });
+
     expect(initTelemetry).not.toHaveBeenCalled();
     expect(registerHooks).not.toHaveBeenCalled();
     expect(registerDiagnosticsListener).not.toHaveBeenCalled();
     expect(initLogPipeline).not.toHaveBeenCalled();
-    expect(api.logger.info).toHaveBeenCalledWith(
-      "[otel] Plugin-management context - hooks skipped, CLI will exit cleanly",
-    );
+  });
+
+  it("skips long-lived init for an undocumented future registrationMode value", async () => {
+    const { initTelemetry, registerHooks, registerDiagnosticsListener, initLogPipeline } =
+      await registerWithMode({ registrationMode: "some-future-mode-core-hasnt-documented-yet" });
+
+    expect(initTelemetry).not.toHaveBeenCalled();
+    expect(registerHooks).not.toHaveBeenCalled();
+    expect(registerDiagnosticsListener).not.toHaveBeenCalled();
+    expect(initLogPipeline).not.toHaveBeenCalled();
+  });
+
+  it("still runs long-lived init when registrationMode is \"full\" (normal gateway startup, confirmed live)", async () => {
+    const { initTelemetry, registerHooks, registerDiagnosticsListener } =
+      await registerWithMode({ registrationMode: "full" });
+
+    expect(initTelemetry).toHaveBeenCalled();
+    expect(registerHooks).toHaveBeenCalled();
+    expect(registerDiagnosticsListener).toHaveBeenCalled();
+  });
+
+  it("still runs long-lived init when registrationMode is undefined (older host, back-compat only — no currently-supported host actually lacks this field)", async () => {
+    const { initTelemetry, registerHooks, registerDiagnosticsListener } =
+      await registerWithMode({});
+
+    expect(initTelemetry).toHaveBeenCalled();
+    expect(registerHooks).toHaveBeenCalled();
+    expect(registerDiagnosticsListener).toHaveBeenCalled();
   });
 
   it("stop flushes telemetry without destructively shutting providers down", async () => {

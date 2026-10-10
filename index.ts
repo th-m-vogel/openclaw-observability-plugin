@@ -90,49 +90,63 @@ function teardownActiveRegistration(logger: any): void {
 }
 
 /**
- * Detect whether the current process is running a plugin-management CLI
- * command (install / inspect / doctor / list / uninstall) or another
- * one-shot CLI command that eagerly loads every plugin's register() without
- * running the plugin as a long-lived gateway. These commands only validate
- * and load the plugin entry point; they must not start long-lived exporters
- * or background timers, otherwise the CLI never exits.
+ * ISI-1900: whether this `register()` call is anything other than a real,
+ * live "full" activation. OpenClaw core tells every plugin exactly this via
+ * `api.registrationMode` — the authoritative signal, not an inference from
+ * argv. This plugin used to guess instead (see the now-removed
+ * `isPluginMgmtContext()`, an argv allow-list for specific CLI subcommands),
+ * which had two problems: it couldn't recognize non-full loads that have no
+ * distinguishing argv at all (OpenClaw core can load a separate, independent
+ * module instance of this plugin for a read-only "discovery" pass during
+ * completely normal gateway operation — the actual mechanism behind
+ * openclaw/openclaw#166289's duplicate `model.usage` dispatch, since this
+ * plugin's diagnostics-event subscription lives on a globalThis-shared
+ * dispatcher, not a module-scoped one, so a second "discovery" instance's
+ * subscription receives the exact same event dispatch as the real one);
+ * and it had to be hand-updated every time core added a new one-shot
+ * command. Root-caused and reproduced independently of a live gateway by
+ * community contributor Yigtwxx:
+ * https://github.com/openclaw/openclaw/issues/166289#issuecomment-6096617591
  *
- * `openclaw completion --write-state` is the other confirmed case: it calls
- * `registerPluginCliCommandsFromValidatedConfig(..., { mode: "eager" })` to
- * harvest each plugin's CLI commands for the shell-completion script. That
- * invokes this plugin's real register(), but the process never fires
- * `gateway_stop`, so without this guard the plugin starts live OTel
- * exporters/timers that keep the process alive until an external timeout
- * kills it (observed: hangs the "completion" stage of `openclaw update`
- * indefinitely, causing the update to time out and exit prematurely).
+ * Empirically confirmed live against a real OpenClaw install (2026-10-10,
+ * via a temporary instrumented register()) that every one of the old argv
+ * allow-list's commands which actually reaches `register()` for this
+ * plugin reports a non-`"full"` mode: `plugins doctor` → `"discovery"`,
+ * `plugins inspect --runtime --json` → `"tool-discovery"`,
+ * `completion --write-state` → `"discovery"` (two of those three differ
+ * from what core's own docs/test-file naming would have suggested —
+ * confirmed live rather than assumed). `plugins list`/`update`/`uninstall`
+ * turned out not to invoke `register()` for a path-sourced plugin at all in
+ * the scenarios tested, making their old argv entries already-dead-code.
+ * `plugins install` has no safe non-mutating invocation to test this way
+ * (no `--dry-run` flag, unlike `update`/`uninstall`), so it keeps a narrow,
+ * install-specific argv fallback below rather than relying on
+ * `api.registrationMode` alone for a case this plugin never actually
+ * observed live.
+ *
+ * `api.registrationMode` has existed in OpenClaw core since at least
+ * 2026-07-16 — well before this plugin's own `minOpenClawVersion:
+ * "2026.9.8"` floor — so there is no currently-supported host where this
+ * field is genuinely absent. The `undefined` fallback below is kept anyway
+ * as a free, zero-cost defensive measure, not because it's expected to
+ * ever trigger.
  */
-function isPluginMgmtContext(): boolean {
+function isNonFullRegistration(api: { registrationMode?: string }): boolean {
+  if (api.registrationMode !== undefined && api.registrationMode !== "full") {
+    return true;
+  }
+  // Narrow argv fallback: `plugins install` couldn't be safely tested live
+  // (no --dry-run flag exists for it, unlike update/uninstall), so keep
+  // catching it unconditionally here regardless of what registrationMode
+  // reports — same safety margin the old isPluginMgmtContext() gave it,
+  // not weakened by this change. Also covers any host old enough to not
+  // send registrationMode at all.
   const argv = process.argv.slice(1);
-  const pluginMgmtSubcommands = [
-    "install",
-    "inspect",
-    "doctor",
-    "list",
-    "uninstall",
-    "update",
-  ] as const;
-  const pluginMgmtSubcommandSet = new Set<string>(pluginMgmtSubcommands);
-
-  const isPluginsSubcommand = argv.some((arg, index) => {
+  return argv.some((arg, index) => {
     const normalizedArg = arg.toLowerCase();
     const nextArg = argv[index + 1]?.toLowerCase();
-    return normalizedArg === "plugins" &&
-      nextArg !== undefined &&
-      pluginMgmtSubcommandSet.has(nextArg);
+    return normalizedArg === "plugins" && nextArg === "install";
   });
-  if (isPluginsSubcommand) return true;
-
-  // Other one-shot top-level commands that eagerly register plugins
-  // without an accompanying `gateway_stop` lifecycle event.
-  const oneShotTopLevelCommands = ["completion"] as const;
-  const oneShotTopLevelCommandSet = new Set<string>(oneShotTopLevelCommands);
-
-  return argv.some((arg) => oneShotTopLevelCommandSet.has(arg.toLowerCase()));
 }
 
 // ── Public re-exports ───────────────────────────────────────────────
@@ -203,11 +217,13 @@ const otelObservabilityPlugin = {
     // registerHooks returns a cleanup fn (clears the stale-session
     // sweeper interval) so service.stop() doesn't leak the timer.
 
-    // ISI-1710: skip long-lived initialization during plugin-management
-    // CLI commands (install/inspect/doctor) so they terminate normally.
-    const pluginMgmt = isPluginMgmtContext();
-    if (pluginMgmt) {
-      logger.info("[otel] Plugin-management context detected — skipping telemetry init");
+    // ISI-1900: skip long-lived initialization unless this is a real, live
+    // "full" registration (see isNonFullRegistration() above).
+    const skipLongLivedInit = isNonFullRegistration(api);
+    if (skipLongLivedInit) {
+      logger.info(
+        `[otel] Non-full registration (${String(api.registrationMode)}) detected — skipping telemetry init`,
+      );
     }
 
     // ISI-9700: OpenClaw 9.7 regression — some async path produces an
@@ -222,7 +238,7 @@ const otelObservabilityPlugin = {
     // suppression so the symptom is observable even though we prevent the crash.
     const REJECTION_HANDLERS_KEY = Symbol.for("openclaw.unhandledRejection.handlers");
     let rejectionHandlerCleanup: (() => void) | null = null;
-    if (!pluginMgmt) {
+    if (!skipLongLivedInit) {
       const handlers = (globalThis as any)[REJECTION_HANDLERS_KEY];
       if (handlers instanceof Set) {
         const undefinedRejectionHandler = (reason: unknown): boolean => {
@@ -250,21 +266,22 @@ const otelObservabilityPlugin = {
     }
 
     try {
-      if (!pluginMgmt) {
+      if (!skipLongLivedInit) {
         telemetry = initTelemetry(config, logger);
       }
 
       // ISI-997 — wire the OTLP log pipeline + bridge api.logger calls so
       // every gateway log emitted by this plugin (and anyone holding the
       // same logger reference) is exported as an OTel LogRecord.
-      // ISI-1710: gate behind !pluginMgmt — initLogPipeline() starts a
-      // BatchLogRecordProcessor (repeating flush timer + OTLP exporter) and
-      // mutates the global LoggerProvider. Since `logs` defaults to true,
-      // an unguarded pipeline would start long-lived exporter work during
-      // `plugins install/inspect/doctor` (and, under protocol: grpc, keep
-      // the event loop alive so the CLI never exits) — the exact failure
-      // this guard exists to prevent.
-      if (!pluginMgmt && config.logs) {
+      // ISI-1710/ISI-1900: gate behind !skipLongLivedInit — initLogPipeline()
+      // starts a BatchLogRecordProcessor (repeating flush timer + OTLP
+      // exporter) and mutates the global LoggerProvider. Since `logs`
+      // defaults to true, an unguarded pipeline would start long-lived
+      // exporter work during a non-full registration (and, under
+      // protocol: grpc, keep the event loop alive so a one-shot CLI
+      // invocation never exits) — the exact failure this guard exists to
+      // prevent.
+      if (!skipLongLivedInit && config.logs) {
         logPipeline = initLogPipeline(config, logger);
         thisRegistration.logPipeline = logPipeline;
         if (logPipeline) {
@@ -274,11 +291,11 @@ const otelObservabilityPlugin = {
         }
       }
 
-      // ISI-1710: only register hooks in non-plugin-mgmt contexts.
+      // ISI-1900: only register hooks for a real, live "full" registration.
       // Hooks are snapshotted by OpenClaw at registration time; skipping
-      // them here means the gateway (which does not use plugin-mgmt CLI)
+      // them here means a real gateway (which always registers as "full")
       // still gets them when it loads the plugin normally.
-      if (!pluginMgmt) {
+      if (!skipLongLivedInit) {
         stopHooks = registerHooks(api, () => telemetry, config);
         thisRegistration.stopHooks = stopHooks;
       }
@@ -290,8 +307,8 @@ const otelObservabilityPlugin = {
         gatewayStopFinalizationStarted = true;
         await gatewayStopFinalizer?.();
       });
-      if (pluginMgmt) {
-        logger.info("[otel] Plugin-management context - hooks skipped, CLI will exit cleanly");
+      if (skipLongLivedInit) {
+        logger.info("[otel] Non-full registration - hooks skipped, CLI will exit cleanly");
       } else {
         logger.info("[otel] Telemetry + hooks initialized at register() (runner-compatible)");
       }
@@ -357,7 +374,7 @@ const otelObservabilityPlugin = {
     // so we capture gateway health metrics even if start() isn't called.
     // ISI-1710: skip in plugin-mgmt contexts to avoid async work that
     // prevents CLI exit.
-    if (telemetry && !pluginMgmt) {
+    if (telemetry && !skipLongLivedInit) {
       registerDiagnosticsListener(telemetry, logger).then((unsub) => {
         unsubscribeDiagnostics = unsub;
         thisRegistration.unsubscribeDiagnostics = unsub;
