@@ -2504,16 +2504,6 @@ export function registerHooks(
   const orphanSubagentSpans = new Map<string, { span: Span; startTime: number }>();
   const ORPHAN_SPAWN_SPAN_CAP = 256;
 
-  /**
-   * Guards the `subagent_ended` token-metric recording below against
-   * recording the same child session's usage twice if the event ever
-   * fires more than once for it (no dedup existed here previously — unlike
-   * the `model.usage` path, which now has one against openclaw/openclaw#166289).
-   * One-shot: a given subagent session only ever ends once.
-   */
-  const finalizedSubagentSessions = new Set<string>();
-  const FINALIZED_SUBAGENT_CAP = 1000;
-
   /** Apply the `subagent_spawned`-only resolved fields to a spawn span. */
   function applyResolvedSubagentFields(
     span: Span,
@@ -2795,23 +2785,15 @@ export function registerHooks(
             [GEN_AI_RESPONSE_MODEL]: model,
           });
 
-          // ISI-1019: Record token usage metrics for subagent — guarded
-          // against double-recording if this event ever fires twice for
-          // the same child session (see `finalizedSubagentSessions` above).
-          if (totalTokens > 0 && !finalizedSubagentSessions.has(childSessionKey)) {
-            finalizedSubagentSessions.add(childSessionKey);
-            if (finalizedSubagentSessions.size > FINALIZED_SUBAGENT_CAP) {
-              const oldest = finalizedSubagentSessions.values().next().value;
-              if (oldest !== undefined) finalizedSubagentSessions.delete(oldest);
-            }
-            const metricAttrs = {
-              [OC_SUBAGENT_CHILD_AGENT_NAME]: childAgentName,
-              [GEN_AI_RESPONSE_MODEL]: model,
-            };
-            counters.tokensPrompt.add(inputTokens, metricAttrs);
-            counters.tokensCompletion.add(outputTokens, metricAttrs);
-            counters.tokensTotal.add(totalTokens, metricAttrs);
-          }
+          // No token-metric recording here (deliberately removed): this
+          // child session's real calls are already counted once, per real
+          // model API call, via the model.call.completed/.error path —
+          // recording them again here under a different, incompatible
+          // label schema (no gen_ai.conversation.id, no provider) would
+          // double-count them under two disjoint schemas whenever core
+          // populates event.usage on subagent_ended. The span attributes
+          // above (gen_ai.usage.input_tokens etc.) still carry this
+          // subagent's usage for trace-level inspection.
 
           span.end();
           parentSessionCtx?.activeToolSpans?.delete(subagentKey);
@@ -3287,6 +3269,14 @@ export function registerHooks(
       }
     }
   }, 60_000);
+  // Same reasoning as telemetry.ts's metric heartbeat: in a "full"
+  // one-shot embedded runner context with no stop() ever called, an
+  // unref()'d timer still fires on schedule but doesn't by itself keep
+  // the process alive once there's nothing else to wait on — the same
+  // class of bug as the old completion-hang issue this guards against.
+  if (typeof (cleanupInterval as { unref?: () => void }).unref === "function") {
+    (cleanupInterval as { unref: () => void }).unref();
+  }
 
   return () => {
     clearInterval(cleanupInterval);
