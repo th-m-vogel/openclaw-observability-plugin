@@ -63,10 +63,10 @@ This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plu
 
 ## Quick start
 
-1. Clone, pinned to a release tag, and build:
+1. Clone, pinned to a release tag, into your OpenClaw install's `plugins/` directory, and build:
    ```bash
-   git clone --branch v0.10.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git
-   cd openclaw-observability-plugin
+   git clone --branch v0.10.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git ~/.openclaw/plugins/otel-observability
+   cd ~/.openclaw/plugins/otel-observability
    npm ci && npm run build
    ```
 
@@ -74,7 +74,7 @@ This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plu
    ```json
    {
      "plugins": {
-       "load": { "paths": ["/path/to/openclaw-observability-plugin"] },
+       "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
        "entries": {
          "otel-observability": {
            "enabled": true,

@@ -56,16 +56,18 @@ For connected traces and per-tool-call visibility, add the custom plugin.
 ### Step 1: Clone the Repository
 
 ```bash
-cd ~/.openclaw/extensions
+mkdir -p ~/.openclaw/plugins && cd ~/.openclaw/plugins
 git clone --branch v0.10.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git otel-observability
 ```
 
-### Step 2: Install Dependencies
+### Step 2: Install Dependencies and Build
 
 ```bash
 cd otel-observability
-npm install
+npm ci && npm run build
 ```
+
+The gateway loads the compiled `dist/index.js`, not the TypeScript source directly — `dist/` isn't checked into the repo, so this build step is required, not optional. Re-run it after every `git pull` that updates this plugin.
 
 ### Step 3: Configure OpenClaw
 
@@ -75,7 +77,7 @@ Add to your `~/.openclaw/openclaw.json`:
 {
   "plugins": {
     "load": {
-      "paths": ["~/.openclaw/extensions/otel-observability"]
+      "paths": ["~/.openclaw/plugins/otel-observability"]
     },
     "entries": {
       "otel-observability": {
