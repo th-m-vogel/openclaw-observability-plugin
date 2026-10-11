@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [0.11.0-dev](https://github.com/th-m-vogel/openclaw-observability-plugin/compare/v0.10.0...0.11.0-dev) (in progress)
 
-Dev branch (`0.11.0-dev`), not yet released — tracking status in the fork's private `STATUS.md`, live-testing on Thomas/Marvin's own installation before this ships.
+Dev branch (`0.11.0-dev`), not yet released — live-testing on the maintainer's own installation before this ships.
 
 This went through two passes. The first attempted to move token/request/duration metrics onto the `model_call_started`/`model_call_ended` hook pair for real per-call granularity, on the premise that this hook carries real per-call `usage` data. Live-testing disproved that premise: this hook's real event payload has no `usage` field at all (confirmed both by capturing the actual event shape in production and by OpenClaw's own hook-reference docs, which describe this pair as "timing, outcome, bounded request-id hashes... no response content" — deliberate, not a bug). Neither does `llm_output`, the only other hook with a documented `usage` field: it reports the same turn-aggregated numbers as `model.usage`, not real per-call ones. **Real per-call token usage does not exist anywhere in OpenClaw's plugin API today.** What shipped below is the second, scoped-down pass: keep what's genuinely per-call and real (request count, duration), revert what wasn't (tokens, which stay turn-level, same as pre-0.11.0), and fix the schema bug the simple way instead.
 
