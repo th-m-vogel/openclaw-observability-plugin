@@ -2,657 +2,112 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-OpenTelemetry observability for [OpenClaw](https://github.com/openclaw/openclaw) AI agents.
+An OpenTelemetry plugin for [OpenClaw](https://github.com/openclaw/openclaw) AI agents. It hooks into OpenClaw's typed plugin lifecycle (`register()`/`start()`/`stop()`) and diagnostic-event stream to emit connected traces, token/cost metrics, and structured logs for a gateway's full agent lifecycle — sessions, agent turns, model calls, tool calls, sub-agents, and cron jobs — to any OTLP-compatible backend.
 
-📖 **[Full Documentation](./docs/index.md)** — Setup guides, configuration reference, and backend examples.
+📖 **[Full Documentation](./docs/index.md)** — setup guide, configuration reference, backend examples, architecture.
 
 ## This fork
 
-`th-m-vogel/openclaw-observability-plugin` is a maintained fork of the upstream project above. Upstream (`henrikrexed/openclaw-observability-plugin`) has had no maintainer activity since 2026-07-20 — including no response to unrelated contributors' trivial, uncontroversial PRs — so this fork treats itself as the canonical, actively maintained version rather than waiting on upstream merges.
+`th-m-vogel/openclaw-observability-plugin` is a maintained fork of [`henrikrexed/openclaw-observability-plugin`](https://github.com/henrikrexed/openclaw-observability-plugin). Upstream has had no maintainer activity since 2026-07-20, so this fork is the canonical, actively maintained version going forward rather than something waiting on upstream merges.
 
-**Current release: `0.10.0`**, running in production against a live OpenClaw gateway. Changes since `0.9.2`:
+It's a **drop-in replacement** for the original plugin — the original single shared `endpoint`/`headers`/`protocol` config still works exactly as before (this fork's own additions, like per-signal endpoint overrides, are opt-in extras, not a breaking change). Point `plugins.load.paths` at this fork's clone instead of upstream's and your existing config keeps working unmodified.
 
-- **Native per-signal OTLP endpoints** — traces, metrics, and logs can now ship to different endpoints/headers in one config block (`signalEndpoints`/`signalHeaders`), for backends that expose separate ingestion URLs per signal (e.g. IONOS Cloud Observability). Implements upstream [FR #72](https://github.com/henrikrexed/openclaw-observability-plugin/issues/72). **Fully backward compatible** — existing configs that only set `endpoint`/`headers` are unaffected; every signal falls back to those unless a per-signal override is explicitly set.
-- **Fixed a duplicate cost/token-counting bug** — if the gateway called `register()` again without a preceding `stop()`, the previous registration's hooks and diagnostics listener stayed live alongside the new one, so a single real `model.usage` event got counted twice (confirmed via direct log evidence). Fixed by tearing down the previous registration's resources before setting up the new one.
-
-Changes in `0.9.2`:
-
-- **Fixed a log-timestamp corruption bug** — exported log records had their timestamp double-converted to nanoseconds, landing roughly 57 million years in the future. Backends that validate timestamp plausibility (e.g. Grafana Loki) silently dropped every record, with no error surfaced anywhere in the pipeline. Confirmed fixed.
-- **Fixed `openclaw completion` / `doctor` / `update` hanging indefinitely** — the plugin didn't recognize these as one-shot CLI commands (including the post-update completion-cache refresh `openclaw update` runs automatically) and started full telemetry export instead, so the process never exited. Confirmed fixed.
-- **OpenClaw 9.7 crash-loop — mitigated, not resolved, ongoing.** OpenClaw 9.7 introduced a core regression where an unhandled promise rejection with `reason=undefined` crashes the gateway on every agent turn. This affects the upstream plugin too — it is not caused by this fork. Mitigated here by registering a handler in OpenClaw's internal rejection registry; the underlying regression itself remains open in OpenClaw core, so this stays a workaround until core fixes it.
-
-See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
+See [`CHANGELOG.md`](CHANGELOG.md) for the full release history.
 
 ## Support matrix
 
-The plugin follows a two-track support model. Pick the plugin track that matches your OpenClaw Gateway version. See [`SUPPORT.md`](SUPPORT.md) for the full policy, and [`CONTRIBUTING.md`](CONTRIBUTING.md#backports-to-release01x) for the backport workflow.
+| Fork release | Minimum OpenClaw | Last verified against | Status |
+|---|---|---|---|
+| `0.11.0` (in progress) | `2026.9.8` | `2026.10.1` | Active development — per-call token metrics, `#166289` duplicate-dispatch fix |
+| `0.10.0` | `2026.4.21` | `2026.9.8` | Superseded by `0.11.0` |
+| `0.9.2` | `2026.4.21` | `2026.9.7` | Superseded by `0.10.0` |
 
-| Plugin track | OpenClaw range    | Branch           | Status                                                   | Window                                         |
-| ------------ | ----------------- | ---------------- | -------------------------------------------------------- | ---------------------------------------------- |
-| `0.1.x`      | `< 2026.4.21`     | `release/0.1.x`  | Maintenance — security + critical regressions only        | Through **2026-10-21**                         |
-| `0.2.x`      | `>= 2026.4.21`    | `main`           | Superseded by 0.3.x                                      | Replaced by 0.3.x                             |
-| `0.3.x`      | `>= 2026.4.21`    | `main`           | Active — V3 features, log pipeline, bug fixes             | Default going forward                          |
-| `0.6.x`      | `>= 2026.5.13`    | `main`           | Superseded by 0.7.x / 0.8.x                              | Replaced by 0.8.x                             |
-| `0.7.x`      | `>= 2026.5.13`    | `main`           | Superseded by 0.8.x                                     | Replaced by 0.8.x                             |
-| `0.8.x`      | `>= 2026.5.13`    | `main`           | Superseded by 0.9.x                                      | Replaced by 0.9.x                              |
-| `0.9.x`      | `>= 2026.4.21`    | `main`           | Superseded by 0.10.x                                      | Replaced by 0.10.x                             |
-| `0.10.x`     | `>= 2026.4.21`    | `main`           | **Active (this fork)** — native per-signal OTLP endpoints, duplicate cost/token-counting fix, log-timestamp fix, completion/doctor/update hang fix, OpenClaw 9.7 crash-loop mitigation (**9.7 support ongoing** — mitigation in place, root cause still open in OpenClaw core) | Latest release                                 |
+All releases live on `main`; there is no legacy-version branch split to track. Upgrade by pulling the latest tag — see [Quick start](#quick-start) below.
 
-> OpenClaw `2026.4.21` introduced the `before_model_resolve` and `before_prompt_build` hooks and deprecated `before_agent_start`. The `0.2.x` line targets the new hooks; the `0.1.x` line remains on the legacy hook for existing deployments.
+## What's new
 
-## What's New in 0.10.0
+Only this fork's own work is listed here — see [`CHANGELOG.md`](CHANGELOG.md) for full detail on every entry, including upstream's pre-fork history.
 
-**Released:** 2026-10-04 (this fork)
+**`0.11.0` (in progress):**
+- Real per-call token metrics (`openclaw.llm.requests`/`.duration`/`.tokens.*`), from a real per-model-call diagnostic event instead of once per agent turn.
+- Root-caused and fixed [`openclaw/openclaw#166289`](https://github.com/openclaw/openclaw/issues/166289) — a core mechanism (a second, independent plugin module instance loaded during an internal read-only pass) could duplicate `model.usage` dispatch, double-counting cost/tokens. Replaced an argv-based CLI-command guess with an authoritative check on `api.registrationMode`, closing both this and a related one-shot-CLI-hang issue in the same change.
+- `openclaw plugins install` and every one-shot CLI invocation now skip long-lived telemetry init correctly, confirmed live against a real host across every registration mode OpenClaw reports.
 
-### Features
-- **Native per-signal OTLP endpoints** *(`signalEndpoints`/`signalHeaders`, implements upstream [FR #72](https://github.com/henrikrexed/openclaw-observability-plugin/issues/72))* — traces, metrics, and logs can each ship to a different OTLP endpoint and header set, for backends that expose separate ingestion URLs per signal instead of one shared OTLP collector. Per-signal overrides are used **verbatim** (no `/v1/<signal>` suffix appended), matching the OTel spec's `OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT` semantics — distinct from the shared `endpoint`, which still gets the suffix appended for HTTP. See [Configuration → Per-Signal Endpoints](./docs/configuration.md#configuration-reference).
-- **Backward compatible** — this is purely additive. Configs using only the existing `endpoint`/`headers`/`protocol` keys behave exactly as before; `signalEndpoints`/`signalHeaders` are optional overrides that fall back to `endpoint`/`headers` for any signal left unset.
+**`0.10.0`:**
+- Native per-signal OTLP endpoints (`signalEndpoints`/`signalHeaders`) — traces, metrics, and logs can ship to different ingestion URLs/credentials in one config block.
+- Fixed a duplicate cost/token-counting bug on repeated `register()` calls without an intervening `stop()`.
 
-### Fixes
-- **Duplicate `model.usage` cost/token counting** — if OpenClaw called the plugin's `register()` again without an intervening `stop()`, the previous registration's hooks and diagnostics listener were never torn down, so a single real `model.usage` event could be counted by both the old and new listener. Fixed by tearing down the previous registration's hooks/diagnostics-listener/log-pipeline before setting up the new one, mirroring the same singleton-guard pattern already used for the TracerProvider/MeterProvider.
+**`0.9.2`:**
+- Fixed a log-timestamp double-conversion bug that silently dropped every exported log record on timestamp-validating backends.
+- Fixed `openclaw completion`/`doctor`/`update` hanging indefinitely instead of exiting.
 
-## What's New in 0.9.2
+## What it captures
 
-**Released:** 2026-10-02 (this fork)
+Connected traces for a full agent turn, every span GenAI-semconv-labeled:
 
-### Fixes
-- **Log-timestamp double-conversion** — log record timestamps were pre-scaled to nanoseconds before being handed to the OTel SDK, which then converted them a second time, landing ~57 million years in the future and getting silently dropped by timestamp-validating backends (e.g. Loki).
-- **`openclaw completion` / `doctor` / `update` hang** — the plugin's plugin-management CLI guard didn't recognize the `completion --write-state` one-shot command, so it started full telemetry export during what should be a fire-and-forget CLI introspection step, and the process never exited.
-- **OpenClaw 9.7 unhandled-rejection crash loop** — mitigated (not resolved; root cause is an OpenClaw core regression, tracked as ISI-9700). See "This fork" above.
-
-## What's New in 0.8.0
-
-**Released:** 2026-07-08
-
-### Features
-- **GenAI content keys for Dynatrace AI Observability** *(ISI-1605, schema 1.4.0)* — Emits the stable OTel GenAI content keys (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, `gen_ai.prompt.prompt_filter_results`, `gen_ai.completion.content_filter_results`) **alongside** the existing `openclaw.content.*` mirrors, sharing the same policy gate and redaction funnel. Adds the `traceloop.span.kind` classifier (`task` on agent-turn spans, `tool` on tool spans) for agent-vs-tool attribution. All content keys are **opt-in** and default **off** — they carry prompt/response bodies (PII). See [Dynatrace → AI Observability](./docs/backends/dynatrace.md#ai-observability-gen_ai-content-keys) and [Privacy](./docs/security/privacy.md).
-- **Compaction spans & metrics** *(ISI-1628)* — `openclaw.compaction` span plus counter/histogram around `before_compaction` / `after_compaction`.
-- **Subagent trace propagation** *(ISI-1627)* — `subagent_spawned` migration with end-to-end trace propagation into child sessions.
-
-## What's New in 0.7.0
-
-**Released:** 2026-06-17
-
-### Features
-- **Bounded, redacted tool-error previews** *(ISI-1318)* — Failed tool calls now stamp a redacted, length-capped `openclaw.tool.error_preview` on the tool span so you can triage failures without opening the raw payload. Text is **redacted first, then truncated** to 1024 chars (so a secret straddling the cut can't leak). Gated by the new `captureContent.toolErrorMessages` flag — the one content flag that defaults **on** when `captureContent` is supplied as an object, because error text is operational data, a different privacy class from prompt/response bodies. See [Configuration → `captureContent`](./docs/configuration.md#capturecontent-gateway-launch-setting).
-
-<details>
-<summary>What's New in 0.6.0 (2026-05-13)</summary>
-
-- **Plugin-only dashboard** — Built-in dashboard using collected metrics, spans, and logs for quick observability without external tooling
-- **Token types** — Added `cache_read` and `cache_creation` token types for `gen_ai.client.token.usage` histogram
-- **Diagnostics** — Improved diagnostic event handling with internal module fallback, debug logging, and health metrics wiring
-- **Telemetry** — Prevented double-registration breaking span parent chains; trace context store persistence across plugin reloads
-- **Bug fixes** — Dashboard hostname filter and CPU utilization corrections; cache token type defaults for missing data
-
-</details>
-
-## Two Approaches to Observability
-
-This repository documents **two complementary approaches** to monitoring OpenClaw:
-
-| Approach | Best For | Setup Complexity |
-|----------|----------|------------------|
-| **Official Plugin** | Operational metrics, Gateway health, cost tracking | Simple config |
-| **Custom Plugin** | Deep tracing, tool call visibility, request lifecycle | Plugin installation |
-
-**Recommendation:** Use both for complete observability.
-
----
-
-## Approach 1: Official Diagnostics Plugin (Built-in)
-
-OpenClaw v2026.2+ includes **built-in OpenTelemetry support**. Just add to `openclaw.json`:
-
-```json
-{
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "http://localhost:4318",
-      "serviceName": "openclaw-gateway",
-      "traces": true,
-      "metrics": true,
-      "logs": true
-    }
-  }
-}
-```
-
-Then restart:
-
-```bash
-openclaw gateway restart
-```
-
-### What It Captures
-
-> All metrics in this section are emitted by the Gateway's built-in `diagnostics-otel` plugin — **not** by this repo's custom plugin. The custom plugin emits `openclaw.llm.*` and `gen_ai.*` instead (see Approach 2 below).
-
-**Metrics (from `diagnostics-otel`):**
-- `openclaw.tokens` — Token usage by type (input/output/cache)
-- `openclaw.cost.usd` — Estimated model cost
-- `openclaw.run.duration_ms` — Agent run duration
-- `openclaw.context.tokens` — Context window usage
-- `openclaw.webhook.*` — Webhook processing stats
-- `openclaw.message.*` — Message processing stats
-- `openclaw.queue.*` — Queue depth and wait times
-- `openclaw.session.*` — Session state transitions
-
-**Traces:** Model usage, webhook processing, message processing, stuck sessions
-
-**Logs:** All Gateway logs via OTLP with severity, subsystem, and code location
-
----
-
-## Approach 2: Custom Hook-Based Plugin (This Repo)
-
-For **deeper observability**, install the custom plugin from this repo. It uses OpenClaw's typed plugin hooks to capture the full agent lifecycle.
-
-### What It Adds
-
-**Connected Traces:**
 ```
 openclaw.request (root span)
-├── openclaw.session (long-lived session span)
+├── openclaw.session (long-lived, spans many turns)
 ├── openclaw.agent.turn
-│   ├── openclaw.dispatch.prepare
-│   ├── chat {model} (model call span, GenAI semconv)
-│   ├── execute_tool Read (tool span)
-│   ├── execute_tool Write (tool span)
-│   └── execute_tool Bash (tool span)
+│   ├── chat {model} (model call span)
+│   ├── execute_tool Read / Write / Bash (tool spans)
+│   └── ...
 └── openclaw.message.sent
 ```
 
-**V3 New Capabilities:**
+- **Metrics** — real per-call token/request/duration counters, turn-level cost (`openclaw.llm.cost.usd`), tool-call counts and duration, session/queue/webhook/cron gauges and histograms.
+- **Traces** — the full lifecycle above, plus sub-agent spawn/duration spans and security-detection events on spans (prompt injection, dangerous commands, sensitive file access).
+- **Logs** — this plugin's own gateway log lines, bridged to OTLP with severity and structured attributes.
 
-| Feature | Description |
-|---------|-------------|
-| Model Call Spans | `chat {model}` CLIENT spans with full GenAI semconv (request/response model, tokens, cache, finish reasons) |
-| Tool Call Timing | `before_tool_call` / `after_tool_call` hooks with accurate duration, approval workflow |
-| Session Tracking | Long-lived `openclaw.session` spans with duration, request count, end reason |
-| Dispatch Spans | `openclaw.dispatch.prepare` spans for LLM request dispatch phase |
-| Log Export Pipeline | OTLP log export via `log.record` diagnostic events with severity, filtering, trace correlation |
-| Security Detection | Prompt injection, dangerous command, sensitive file access detection on spans |
-| GenAI Semantic Conventions | Full stable `gen_ai.*` attributes alongside legacy `openclaw.*` for dashboard compat |
-| Tool Approval Tracking | `openclaw.tool.approval.requested/resolution/duration_ms` attributes (schema 1.1.0; renamed from `gen_ai.tool.approval.*`) |
-| Cron & Sub-Agent Monitoring | Spans and metrics for cron jobs and sub-agent orchestration |
-| Diagnostic Integration | Token/cost data from `model.usage` events enriches spans via `onDiagnosticEvent` |
+This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plugin, which covers gateway-level health (queues, webhooks) rather than per-request tracing. **Don't run both at once** — both initialize the OTel SDK and can conflict. See [Limitations](./docs/limitations.md) for the full reasoning and a workaround for an npm-install issue that affects the official plugin specifically.
 
-**Per-Tool Visibility:**
-- Individual `execute_tool {name}` spans per GenAI semconv
-- Tool execution time via `before_tool_call` → `after_tool_call`
-- Result size (characters), input preview
-- Error tracking per tool with `error.type`
-- Tool approval requested/resolution/duration
+## Quick start
 
-**Request Lifecycle:**
-- Full message → response tracing with connected parent-child spans
-- Session context propagation via TraceContextStore
-- Agent turn duration with token breakdown from diagnostics
-- Dispatch prepare/reply phase tracking
-
-### Plugin Lifecycle
-
-OpenClaw has two hook registration moments, and the plugin uses both at the right phase:
-
-| Phase | Runs | What the plugin does |
-|---|---|---|
-| `register()` | Synchronous, before the gateway accepts traffic | Initializes the OTel runtime, log pipeline, **all V3 typed hooks** via `api.on()` (see list below), event-stream hooks (`command:*`, `gateway:startup`), the `otel-observability.status` RPC, the `otel` CLI command, the background service, diagnostics listener, and optional `otel_status` agent tool. Hooks receive a **lazy telemetry getter** (`() => telemetry`) so existing handlers keep using the live runtime across hot reload. |
-
-<details>
-<summary>Typed hooks registered in <code>register()</code></summary>
-
-**Lifecycle hooks:** `message_received`, `session_start`, `session_end`, `before_model_resolve`, `before_prompt_build`, `llm_input`, `llm_output`, `model_call_started`, `model_call_ended`, `before_dispatch`, `reply_dispatch`, `before_tool_call`, `after_tool_call`, `tool_approval_resolution`, `tool_result_persist`, `message_sent`, `before_agent_finalize`, `agent_end`, `before_reset`
-
-**Orchestration hooks:** cron hooks (`cron_change`, `cron_execution`, `cron_error`), subagent hooks (`subagent_spawn`, `subagent_ended`)
-
-</details>
-| `start()` | Async, after the gateway is ready | Performs gateway-only work: publishes content-capture env vars for subprocesses, warns on preload/config mismatches, and conditionally initializes OpenLLMetry wraps when `traces` is on. |
-| `stop()` | Async, on gateway reload/shutdown | Clears the stale-session sweeper `setInterval`, unsubscribes from diagnostics, shuts down the log pipeline, and calls `telemetry.flush()` so pending spans/metrics drain without destroying providers. |
-
-### Hot reload and final flush behavior
-
-OpenClaw config hot-reload calls `stop()` and then `register()` in the same process. The plugin treats `stop()` as a non-destructive drain: it calls `forceFlush()` on trace and metric providers, but keeps the providers alive so hooks that still reference the existing runtime continue to export telemetry after reload.
-
-That tradeoff preserves data, but trace/metric provider config changes do not rebuild the live providers until a full process restart. Changes to `endpoint`, `headers`, `protocol`, `serviceName`, `traces`, `metrics`, `sampleRate`, `metricsIntervalMs`, `resourceAttributes`, and preload-backed content capture can be parsed during reload, but the existing trace/metric runtime keeps using the values it was initialized with. Restart the gateway when changing those settings. The log pipeline is recreated on service `stop()`/`register()` reload, so `logs` and `logConfig` changes can take effect through the plugin reload path.
-
-For `--local` and other code paths that call `process.exit()` before the batch processor interval fires, the plugin publishes `globalThis[Symbol.for("openclaw.otel.preExit")]`. The plugin sets that symbol to a non-destructive flush function during telemetry initialization and clears it from `shutdown()`. CLI exit handlers own calling it before forced exit.
-
-**Why this matters:** OpenClaw snapshots typed hooks at registration time. If hooks are registered from `start()` instead of `register()`, the gateway never sees them and **hooks register but never fire**. PR #6 (see [ISI-515](https://github.com/henrikrexed/openclaw-observability-plugin/pull/6)) moved them back to `register()`, and current builds initialize telemetry in `register()` while using the lazy getter so hot-reload handlers keep resolving the live runtime.
-
-### Installation
-
-> This fork is **not published to npm** — it's a GitHub-only distribution. Install by cloning the repository and loading it by path, pinned to a release tag.
-
-1. Clone this repository, pinned to the release tag you want:
+1. Clone, pinned to a release tag, and build:
    ```bash
    git clone --branch v0.10.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git
    cd openclaw-observability-plugin
    npm ci && npm run build
    ```
 
-2. Add to your `openclaw.json` pointing at the clone path:
+2. Point `openclaw.json` at the clone and enable it:
    ```json
    {
      "plugins": {
-       "load": {
-         "paths": ["/path/to/openclaw-observability-plugin"]
-       },
+       "load": { "paths": ["/path/to/openclaw-observability-plugin"] },
        "entries": {
          "otel-observability": {
            "enabled": true,
-           "hooks": {
-             "allowConversationAccess": true
-           }
+           "hooks": { "allowConversationAccess": true },
+           "config": { "endpoint": "http://localhost:4318" }
          }
        }
      }
    }
    ```
+   `hooks.allowConversationAccess: true` is required on OpenClaw ≥ 2026.4.23 — without it, the conversation-tracing hooks are silently blocked and no `openclaw.agent.turn` spans ever reach your backend.
 
-   > **Required for OpenClaw ≥ 2026.4.23.** The runtime silently blocks the conversation typed hooks (`before_model_resolve`, `llm_input`, `llm_output`, `before_agent_finalize`, `agent_end`, `before_agent_reply`, `before_agent_run`) for non-bundled (path-loaded) plugins unless `hooks.allowConversationAccess: true` is set on the entry. Without it, the registration banners still print but `openclaw.request` / `openclaw.agent.turn` spans never reach your backend. See [Troubleshooting → Hooks register but never fire](#hooks-register-but-never-fire) and [github issue #20](https://github.com/henrikrexed/openclaw-observability-plugin/issues/20).
-
-3. Clear cache and restart:
+3. Clear the jiti cache and restart:
    ```bash
    rm -rf /tmp/jiti
    systemctl --user restart openclaw-gateway
    ```
 
-### Validate your first trace
-
-Send a message that triggers at least one tool call and check Gateway logs for the lifecycle markers:
-
-```bash
-journalctl --user -u openclaw-gateway -f | grep -E '\[otel\]'
-```
-
-You should see, in this order:
-
-```
-[otel] Registered message_received hook (via api.on)
-[otel] Registered before_model_resolve hook (via api.on)
-[otel] Registered before_prompt_build hook (via api.on)
-[otel] Registered model_call_started hook (via api.on)
-[otel] Registered before_tool_call hook (via api.on)
-[otel] Registered tool_result_persist hook (via api.on)
-[otel] Registered agent_end hook (via api.on)
-[otel] Registered session_start hook (via api.on)
-[otel] Registered command event hooks (via api.registerHook)
-[otel] Registered gateway:startup hook (via api.registerHook)
-[otel] Starting OpenTelemetry observability...
-[otel] Telemetry runtime initialized
-[otel] ✅ Log export pipeline initialized
-[otel] ✅ Observability pipeline active
-[otel]   Traces=true Metrics=true Logs=true
-[otel]   Endpoint=http://localhost:4318 (http)
-```
-
-> **Hook migration (v0.2.0, ISI-730).** The plugin migrated off the legacy
-> `before_agent_start` hook. The agent turn span is now started in
-> `before_model_resolve` and enriched in `before_prompt_build`. This requires
-> OpenClaw ≥ 2026.4.21. Pin to `0.1.x` if you need the legacy path.
-
-Then, on the next inbound message, the debug log confirms hooks are live:
-
-```
-[otel] Root span started for session=<sessionKey>
-[otel] Agent turn span started: agent=<agentId>, session=<sessionKey>
-```
-
-In your backend, look for an `openclaw.request` span with at least one `openclaw.agent.turn` child. A healthy trace has `openclaw.request` → `openclaw.agent.turn` → one or more `tool.*` children.
-
----
-
-## Comparing the Two Approaches
-
-| Feature | Official Plugin | Custom Plugin |
-|---------|-----------------|---------------|
-| Token metrics | Per model | Per session + model + cache |
-| Cost tracking | Yes | Yes (from diagnostics) |
-| Gateway health | Webhooks, queues, sessions | Not focused |
-| Session state | State transitions | Long-lived session spans |
-| **Tool call tracing** | No | Individual tool spans with timing |
-| **Request lifecycle** | No | Full request → response connected |
-| **Connected traces** | Separate spans | Parent-child hierarchy |
-| **Model call spans** | No | `chat {model}` with GenAI semconv |
-| **Tool approval** | No | Approval workflow tracking |
-| **Log export** | Basic OTLP | OTLP with filtering + trace correlation |
-| **Security detection** | No | Prompt injection, dangerous commands |
-| **Cron monitoring** | No | Cron change/execution/error spans |
-| **Sub-agent tracking** | No | Spawn/duration/ended spans |
-| **Dashboard** | No | Plugin-only dashboard with metrics/spans/logs |
-| Setup complexity | Config only | Plugin installation |
-
----
-
-## Backend Examples
-
-### Dynatrace (Direct)
-
-```json
-{
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "https://{env-id}.live.dynatrace.com/api/v2/otlp",
-      "headers": {
-        "Authorization": "Api-Token {your-token}"
-      },
-      "serviceName": "openclaw-gateway",
-      "traces": true,
-      "metrics": true,
-      "logs": true
-    }
-  }
-}
-```
-
-### Grafana Cloud
-
-```json
-{
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "https://otlp-gateway-{region}.grafana.net/otlp",
-      "headers": {
-        "Authorization": "Basic {base64-credentials}"
-      },
-      "serviceName": "openclaw-gateway",
-      "traces": true,
-      "metrics": true
-    }
-  }
-}
-```
-
-### Local OTel Collector
-
-```json
-{
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "http://localhost:4318",
-      "serviceName": "openclaw-gateway",
-      "traces": true,
-      "metrics": true,
-      "logs": true
-    }
-  }
-}
-```
-
----
-
-## Configuration Reference
-
-### Built-in OpenClaw Diagnostics Options
-
-These keys configure OpenClaw core's built-in diagnostics exporter. They are not the config surface for this custom hook-based plugin.
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `diagnostics.enabled` | boolean | false | Enable diagnostics system |
-| `diagnostics.otel.enabled` | boolean | false | Enable OTel export |
-| `diagnostics.otel.endpoint` | string | — | OTLP endpoint URL |
-| `diagnostics.otel.protocol` | string | "http/protobuf" | Protocol |
-| `diagnostics.otel.headers` | object | — | Custom headers |
-| `diagnostics.otel.serviceName` | string | "openclaw" | Service name |
-| `diagnostics.otel.traces` | boolean | true | Enable traces |
-| `diagnostics.otel.metrics` | boolean | true | Enable metrics |
-| `diagnostics.otel.logs` | boolean | false | Enable logs |
-| `diagnostics.otel.sampleRate` | number | (unset) | Built-in diagnostics trace sampling, if supported by your OpenClaw version. This custom plugin uses `plugins.entries.otel-observability.config.sampleRate` below. |
-
-### Custom Plugin Options
-
-This plugin reads its settings from `plugins.entries.otel-observability.config`:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "otel-observability": {
-        "enabled": true,
-        "config": {
-          "endpoint": "http://localhost:4318",
-          "protocol": "http",
-          "serviceName": "openclaw-gateway"
-        }
-      }
-    }
-  }
-}
-```
-
-The following settings are controlled via that plugin entry `config` block:
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `endpoint` | string | `http://localhost:4318` | OTLP endpoint URL |
-| `serviceName` | string | `openclaw-gateway` | Service name |
-| `protocol` | string | `http` | OTLP protocol (`http` or `grpc`) |
-| `traces` | boolean | true | Enable traces |
-| `metrics` | boolean | true | Enable metrics |
-| `logs` | boolean | true | Enable OTLP log export via diagnostic events |
-| `captureContent` | boolean \| `ContentCapturePolicy` | `false` (all off) | Capture prompt/completion/tool content on spans. Accepts a boolean (all-on or all-off, legacy) or a granular object with the per-category flags `inputMessages`, `outputMessages`, `toolInputs`, `toolOutputs`, `systemPrompt`. Privacy-sensitive — see [docs/security/privacy.md](./docs/security/privacy.md). |
-| `metricsIntervalMs` | number | 30000 | Metric export interval in milliseconds |
-| `sampleRate` | number | unset | Head-based trace sampling rate, 0.0-1.0. Omit to use the SDK default. |
-| `resourceAttributes` | object | `{}` | Extra OpenTelemetry resource attributes |
-| `logConfig` | object | unset | Log pipeline filtering and exclusion rules |
-
-### Log Pipeline Configuration
-
-The log export pipeline supports filtering and exclusion rules via the `logConfig` block:
-
-```json
-{
-  "logConfig": {
-    "enabled": true,
-    "excludeLevels": ["debug", "trace"],
-    "excludeLoggers": ["noisy-module"],
-    "excludeMessagePatterns": ["health check", "/ping/i"],
-    "filters": [
-      { "field": "logger", "pattern": "internal.", "action": "exclude" }
-    ]
-  }
-}
-```
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `enabled` | boolean | Enable log pipeline (default: true) |
-| `excludeLevels` | string[] | Severity levels to exclude (e.g., `["debug", "trace"]`) |
-| `excludeLoggers` | string[] | Logger names to exclude (case-insensitive substring match) |
-| `excludeMessagePatterns` | (string\|RegExp)[] | Message patterns to exclude |
-| `filters` | FilterRule[] | Advanced filter rules with `field`, `pattern`, `action` |
-
----
-
-## Documentation
-
-- [Getting Started](./docs/getting-started.md) — Setup guide
-- [Configuration](./docs/configuration.md) — All options
-- [Architecture](./docs/architecture.md) — How it works
-- [Migration V2 → V3](./docs/migration-v2-to-v3.md) — Upgrade guide
-- [Limitations](./docs/limitations.md) — Known constraints
-- [Backends](./docs/backends/) — Backend-specific guides
-
----
-
-## Optional: Kernel-Level Security with Tetragon
-
-For **defense in depth**, add [Tetragon](https://tetragon.io) eBPF-based monitoring. While the plugins above capture application-level telemetry, Tetragon sees what happens at the kernel level — file access, process execution, network connections, and privilege changes.
-
-### Why Tetragon?
-
-- **Tamper-proof**: Even a compromised agent can't hide its kernel-level actions
-- **Sensitive file detection**: Alert when `.env`, SSH keys, or credentials are accessed
-- **Dangerous command detection**: Catch `rm`, `curl | sh`, `chmod 777`, etc.
-- **Privilege escalation**: Detect `setuid`/`setgid` attempts
-- **Supply chain defense**: Monitor npm/pip installs for malicious packages
-- **Persistence detection**: Catch HEARTBEAT.md/SOUL.md tampering
-- **Network exfiltration**: Detect DNS/HTTP data exfiltration attempts
-- **Obfuscation detection**: Flag base64/encoding tool usage
-- **Git credential protection**: Monitor git operations and credential access
-
-### TracingPolicy Coverage (11 Policies)
-
-| # | Policy | Threat | References |
-|---|--------|--------|------------|
-| 01 | `process-exec` | All process execution | General visibility |
-| 02 | `sensitive-files` | Credential/file theft | SSH, AWS, Kube configs |
-| 04 | `privilege-escalation` | Root access attempts | setuid/setgid/sudo |
-| 05 | `dangerous-commands` | Destructive/exfil commands | rm, curl, nc, xmrig |
-| 06 | `kernel-modules` | Rootkit loading | init_module, insmod |
-| 07 | `prompt-injection-shell` | Injected shell commands | curl\|bash, reverse shells |
-| 08 | `network-exfiltration` | DNS/HTTP data exfil | CVE-2025-55284, Agent Commander C2 |
-| 09 | `supply-chain` | Malicious packages | LiteLLM 1.82.8, Trivy compromise |
-| 10 | `persistence-tampering` | Config/memory tampering | HEARTBEAT.md backdoor, Skill overwrite |
-| 11 | `obfuscation-encoding` | Encoded payloads | Unicode steganography, base64 |
-| 12 | `git-operations` | Git credential theft | Force push, .git-credentials |
-
-Policies are in [`tetragon-policies/`](./tetragon-policies/) with install instructions.
-
-```bash
-# Install Tetragon
-curl -LO https://github.com/cilium/tetragon/releases/latest/download/tetragon-v1.6.0-amd64.tar.gz
-tar -xzf tetragon-v1.6.0-amd64.tar.gz && cd tetragon-v1.6.0-amd64
-sudo ./install.sh
-
-# Create OpenClaw policies directory
-sudo mkdir -p /etc/tetragon/tetragon.tp.d/openclaw
-
-# Add policies (see docs/security/tetragon.md for full examples)
-# Start Tetragon
-sudo systemctl enable --now tetragon
-```
-
-Tetragon events are exported to `/var/log/tetragon/tetragon.log` and can be ingested by the OTel Collector using the `filelog` receiver.
-
-### Complete Observability Stack
-
-| Layer | Source | What It Shows |
-|-------|--------|---------------|
-| **Application** | Custom Plugin | Tool calls, tokens, request flow |
-| **Gateway** | Official Plugin | Session health, queues, costs |
-| **Kernel** | Tetragon | System calls, file access, network |
-
-See [Security: Tetragon](./docs/security/tetragon.md) for full installation and configuration guide.
-
----
-
-## Troubleshooting
-
-### Hooks register but never fire
-
-**Symptom.** The plugin logs `[otel] ✅ Observability pipeline active` at gateway startup and prints all the `[otel] Registered ... hook (via api.on)` banners, but no `openclaw.request` or `openclaw.agent.turn` spans ever reach your backend — even after you send messages that clearly invoke tools. The plugin's metrics keep exporting every 30 s with the right resource attributes but every counter stays at `Value: 0.000000` with `openclaw.idle: Bool(true)` (the idle-keepalive heartbeat).
-
-There are two distinct causes that produce the same outward symptom. Check both.
-
-#### Cause A — `hooks.allowConversationAccess` not set (OpenClaw ≥ 2026.4.23)
-
-OpenClaw 2026.4.23 introduced a typed-hook policy gate. The runtime silently drops registrations for the **conversation hooks** — `before_model_resolve`, `before_agent_reply`, `llm_input`, `llm_output`, `before_agent_finalize`, `agent_end`, `before_agent_run` — when the plugin is **non-bundled** (loaded via `plugins.load.paths`, the install path documented in this repo) and the entry does not explicitly opt in. `api.on(...)` returns silently, so the plugin's `[otel] Registered ... hook` banner still prints, but the handler is never wired into the typed-hook registry. The gateway log records the block as a `pluginDiagnostics` warning:
-
-```
-typed hook "agent_end" blocked because non-bundled plugins must set
-plugins.entries.otel-observability.hooks.allowConversationAccess=true
-```
-
-(One line per blocked hook. Look for it under `openclaw plugins list --diagnostics` or in `~/.openclaw/logs/gateway.log`.)
-
-**Fix.** Set the policy on the plugin entry:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "otel-observability": {
-        "enabled": true,
-        "hooks": {
-          "allowConversationAccess": true
-        }
-      }
-    }
-  }
-}
-```
-
-Restart the gateway after editing. This setting was added to OpenClaw's plugin-config schema in 2026.4.23 alongside the gate; if you saw `Unrecognized key: "allowConversationAccess"` and a `Config auto-restored from last-known-good` rollback on first attempt, you were briefly on a build between [openclaw#71621](https://github.com/openclaw/openclaw/issues/71621) opening and its same-day fix — upgrade to any 2026.4.24+ release.
-
-**Why this matters here.** The conversation hooks are exactly the ones that anchor the plugin's trace structure: `before_model_resolve` opens the agent turn span, `llm_input`/`llm_output` produce the model-call span, and `agent_end` closes everything. Without them, only the standalone counters (`messagesReceived`, etc.) and the `message_received` root span survive — and even those usually go undetected because the agent never finishes the turn properly. Sibling plugins that **are** bundled in OpenClaw (e.g., `memory-lancedb-pro`) are not affected by the gate, which is why their `agent_end` handler still fires on the same turns.
-
-This is the cause behind [github issue #20](https://github.com/henrikrexed/openclaw-observability-plugin/issues/20) and the most common report on `0.2.x`/`0.3.x` against OpenClaw 2026.4.23 or newer.
-
-#### Cause B — Hooks registered from `start()` instead of `register()` (pre-PR #6)
-
-Earlier builds registered typed hooks from inside the async `service.start()` phase. OpenClaw snapshots typed hooks at plugin registration time, ~30 s before `start()` runs, so the gateway never saw the listeners. See [ISI-515](https://github.com/henrikrexed/openclaw-observability-plugin/pull/6).
-
-**Fix.** Upgrade to a build that includes PR #6 (any `0.2.x` or newer). Hooks are now registered synchronously in `register()` and resolve the telemetry runtime lazily.
-
-#### How to confirm hooks are live
-
-1. Check the gateway log for the registration lines emitted from `register()`:
-   ```
-   [otel] Registered message_received hook (via api.on)
-   [otel] Registered before_model_resolve hook (via api.on)
-   [otel] Registered before_prompt_build hook (via api.on)
-   [otel] Registered tool_result_persist hook (via api.on)
-   [otel] Registered agent_end hook (via api.on)
-   [otel] Registered command event hooks (via api.registerHook)
-   [otel] Registered gateway:startup hook (via api.registerHook)
-   ```
-   If these are **missing**, the plugin is not loaded — check `plugins.load.paths` in `openclaw.json` and clear `/tmp/jiti`. If they print but spans still never appear, jump to step 2.
-
-2. Look for `pluginDiagnostics` warnings about blocked typed hooks. The presence of any
-   `typed hook "<name>" blocked because non-bundled plugins must set ... allowConversationAccess=true`
-   line is the deterministic signal for **Cause A** above. The registration banner and the block warning can both be present in the same boot — the banner only proves `api.on()` returned, not that the registration was accepted.
-
-3. Send a real message through the pipeline and watch for the per-event debug lines (enable debug logging first):
-   ```
-   [otel] Root span started for session=<sessionKey>
-   [otel] Agent turn span started: agent=<agentId>, session=<sessionKey>
-   ```
-   If only the `Root span started` line appears but never `Agent turn span started`, conversation hooks are blocked (Cause A). If neither appears on inbound `/v1/chat/completions` or channel messages, the gateway is not firing typed hooks for your event path (e.g., heartbeats and some internal events do not carry full session context).
-
-4. Verify your OTLP endpoint is actually receiving data:
+4. Confirm it's live:
    ```bash
-   curl -v http://localhost:4318/v1/traces
+   journalctl --user -u openclaw-gateway -f | grep -E '\[otel\]'
    ```
+   Send a message, then check your backend for an `openclaw.request` span with at least one `openclaw.agent.turn` child.
 
-### Plugin not loaded at all
+Full walkthrough, every config option, and backend-specific examples (Dynatrace, Grafana Cloud, generic OTLP collector): [Getting Started](./docs/getting-started.md), [Configuration](./docs/configuration.md), [Backends](./docs/backends/).
 
-Check plugin discovery:
+## Known limitations
 
-```bash
-openclaw plugins list
-```
+The one worth knowing before you start debugging a dashboard: **cost and token-breakdown reporting depend entirely on an OpenClaw core event (`model.usage`) that doesn't fire for every session type** — confirmed gaps include per-channel/topic model overrides, internal/background agent-turn sessions, and multi-call tool-use continuation steps (each tracked upstream as its own issue). Real per-call *token counts* still arrive correctly through a separate, more reliable event in all of these cases — only cost and the token-type breakdown go missing. There's no plugin-side fix for an event core never emits.
 
-Clear the jiti cache and restart:
+Also: custom/self-hosted OpenAI-compatible providers always report `cost: undefined` (structural — no cost field exists in that API spec, by design), and zero-code auto-instrumentation isn't possible for this ecosystem (ESM/CJS isolation breaks it) — all telemetry comes from typed hooks and diagnostic events instead.
 
-```bash
-rm -rf /tmp/jiti
-systemctl --user restart openclaw-gateway
-```
-
-### Traces exported but not connected
-
-The custom plugin requires messages to flow through the normal pipeline (`message_received` → `before_model_resolve` → `before_prompt_build` → tools → `agent_end`). Heartbeats and some internal events skip `message_received`, so those turns produce a standalone `openclaw.agent.turn` span without a parent `openclaw.request`. This is expected.
-
----
-
-## Known Limitations
-
-**Auto-instrumentation not possible:** OpenLLMetry/IITM breaks `@mariozechner/pi-ai` named exports due to ESM/CJS module isolation. All telemetry is captured via hooks, not direct SDK instrumentation.
-
-See [Limitations](./docs/limitations.md) for details.
-
----
+Full list, including backend-specific quirks (Loki service-name labels, provider-name inconsistency) and the reasoning behind each: [Limitations](./docs/limitations.md).
 
 ## License
 

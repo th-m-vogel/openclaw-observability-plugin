@@ -152,51 +152,9 @@ openclaw.request
 
 ---
 
-## Using Both Plugins Together
+## Don't run both plugins at once
 
-For complete observability, enable both:
-
-```json
-{
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "http://localhost:4318",
-      "serviceName": "openclaw-gateway",
-      "traces": true,
-      "metrics": true,
-      "logs": true
-    }
-  },
-  "plugins": {
-    "load": {
-      "paths": ["~/.openclaw/extensions/otel-observability"]
-    },
-    "entries": {
-      "otel-observability": {
-        "enabled": true,
-        "hooks": {
-          "allowConversationAccess": true
-        },
-        "config": {
-          "endpoint": "http://localhost:4318",
-          "serviceName": "openclaw-gateway"
-        }
-      }
-    }
-  }
-}
-```
-
-> `hooks.allowConversationAccess: true` is required on OpenClaw ≥ 2026.4.23. See [the install step above](#step-3-configure-openclaw).
-
-**What you get:**
-
-| Source | Data |
-|--------|------|
-| Official | Gateway health, queue metrics, log forwarding, session states |
-| Custom | Connected request traces, tool call spans, agent turn details |
+The official `diagnostics-otel` plugin and this one both initialize the OpenTelemetry SDK and register the global tracer/meter provider — running both at the same time means whichever registers second silently loses (or both end up sharing one provider with mismatched resource/endpoint config), not clean combined coverage. Pick one: the official plugin covers gateway-level health (queues, webhooks, log forwarding); this plugin covers connected per-request tracing, per-tool-call spans, and token/cost metrics. See [Limitations](./limitations.md) for the full reasoning.
 
 ---
 

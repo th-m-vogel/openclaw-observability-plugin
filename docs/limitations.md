@@ -112,3 +112,19 @@ Some Loki-backed OTLP ingestion pipelines (confirmed with IONOS Cloud Observabil
 ## `gen_ai_provider_name` may be missing or inconsistent
 
 Some token-usage metrics and spans are missing the `gen_ai_provider_name` label, or carry it inconsistently across calls to the exact same model/session. Confirmed present for both Anthropic-native and IONOS-routed (Qwen) calls, which rules out a per-backend cause. The plugin reads `event.provider`/`ctx.provider` from OpenClaw core's own `model.usage` event at every call site (see `src/hooks.ts`) and has no independent, reliable signal to backfill from when core omits it. Likely root cause is upstream in OpenClaw core, tracked as [openclaw/openclaw#153244](https://github.com/openclaw/openclaw/issues/153244). Workaround: group Grafana panels/queries by `gen_ai_response_model` instead of `gen_ai_provider_name` until core's event is fixed.
+
+---
+
+## Cost reporting can silently go missing for some session types (OpenClaw core, not this plugin)
+
+`openclaw.llm.cost.usd` (and the token-breakdown-by-type metrics alongside it) come entirely from OpenClaw core's own `model.usage` diagnostic event — this plugin has no independent accounting and only relays what core emits. That event does not fire at all for several confirmed session shapes, each tracked upstream as its own issue since the trigger conditions are distinct:
+
+- **Sessions running under a per-channel/topic model override** — [openclaw/openclaw#164562](https://github.com/openclaw/openclaw/issues/164562).
+- **Internal/background agent-turn sessions** spawned by core itself (scheduled maintenance tasks, memory-effect turns), independent of any model override — [openclaw/openclaw#169156](https://github.com/openclaw/openclaw/issues/169156).
+- **Continuation steps within a multi-call tool-use turn**, correlated with the `messages.groupChat.visibleReplies` channel setting — [openclaw/openclaw#167920](https://github.com/openclaw/openclaw/issues/167920).
+
+In every case, real per-call token counts still arrive correctly via the separate `model.call.completed`/`model.call.error` diagnostic events (see [Telemetry → Tokens](./telemetry/tokens.md)) — only cost and the token-type breakdown go missing, because those two are the only things still tied to `model.usage`. If a dashboard shows tokens with no matching cost for a session, this is almost always why.
+
+A related, separate defect — `model.usage` occasionally double-firing for the exact same real call, inflating cost/tokens — was root-caused to a plugin-side gap (a second, independent module instance loaded during a core-internal read-only pass could receive the same event dispatch) and fixed in this plugin as of the `registrationMode`-based `register()` gate (see `CHANGELOG.md`). That one *was* this plugin's responsibility and is closed; the three gaps above are not — there's no plugin-side workaround for an event that core never emits.
+
+**Custom/self-hosted OpenAI-compatible providers always report `costUsd: undefined`**, tokens unaffected. This is structural, not a bug: the OpenAI Chat Completions API spec has no cost field at all, ever, only a token-count `usage` object. `costUsd` can only exist when OpenClaw core has its own price-per-token table for a given model, which it maintains for known first-party providers but not for arbitrary custom/self-hosted endpoints. No fix is possible on the plugin side for this one.

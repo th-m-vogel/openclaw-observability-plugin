@@ -24,7 +24,7 @@ A plugin that hooks into the agent lifecycle for deeper tracing. Best for:
 - ✅ Request lifecycle visibility
 - ✅ Debugging agent behavior
 
-**Recommendation:** Use both for complete observability.
+**Don't run both at once** — both initialize the OTel SDK and can conflict (global tracer/meter provider state, see [Limitations](./limitations.md)). Pick one.
 
 ## Quick Start
 
