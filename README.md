@@ -18,7 +18,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full release history.
 
 | Fork release | Minimum OpenClaw | Last verified against | Status |
 |---|---|---|---|
-| `0.11.0` (in progress) | `2026.9.8` | `2026.10.1` | Active development — per-call token metrics, `#166289` duplicate-dispatch fix |
+| `0.11.0` | `2026.9.8` | `2026.10.1` | **Active (this fork)** — per-call token metrics, `#166289` duplicate-dispatch fix |
 | `0.10.0` | `2026.4.21` | `2026.9.8` | Superseded by `0.11.0` |
 | `0.9.2` | `2026.4.21` | `2026.9.7` | Superseded by `0.10.0` |
 
@@ -28,7 +28,7 @@ All releases live on `main`; there is no legacy-version branch split to track. U
 
 Only this fork's own work is listed here — see [`CHANGELOG.md`](CHANGELOG.md) for full detail on every entry, including upstream's pre-fork history.
 
-**`0.11.0` (in progress):**
+**`0.11.0`:**
 - Real per-call token metrics (`openclaw.llm.requests`/`.duration`/`.tokens.*`), from a real per-model-call diagnostic event instead of once per agent turn.
 - Root-caused and fixed [`openclaw/openclaw#166289`](https://github.com/openclaw/openclaw/issues/166289) — a core mechanism (a second, independent plugin module instance loaded during an internal read-only pass) could duplicate `model.usage` dispatch, double-counting cost/tokens. Replaced an argv-based CLI-command guess with an authoritative check on `api.registrationMode`, closing both this and a related one-shot-CLI-hang issue in the same change.
 - `openclaw plugins install` and every one-shot CLI invocation now skip long-lived telemetry init correctly, confirmed live against a real host across every registration mode OpenClaw reports.
@@ -65,7 +65,7 @@ This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plu
 
 1. Clone, pinned to a release tag, into your OpenClaw install's `plugins/` directory, and build:
    ```bash
-   git clone --branch v0.10.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git ~/.openclaw/plugins/otel-observability
+   git clone --branch v0.11.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git ~/.openclaw/plugins/otel-observability
    cd ~/.openclaw/plugins/otel-observability
    npm ci && npm run build
    ```
