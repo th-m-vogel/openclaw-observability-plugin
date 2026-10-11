@@ -326,6 +326,35 @@ describe("internal diagnostics export resolution", () => {
     expect(telemetry.meter.createCounter).toHaveBeenCalledTimes(2);
   });
 
+  it("survives a malformed event (non-numeric costUsd) without crashing, logging it instead of throwing into core's dispatcher", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.usage", sessionKey: "agent:main:bad", provider: "custom-provider",
+          model: "some-model", usage: { total: 1000 }, costUsd: "not-a-number",
+        });
+        // A well-formed event right after, on the same listener — proves
+        // the malformed one didn't tear the subscription down.
+        listener({
+          type: "model.usage", sessionKey: "agent:main:good", provider: "custom-provider",
+          model: "some-model", usage: { total: 500 }, costUsd: 0.05,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const logger = createLogger();
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), logger, telemetry);
+
+    // Did not throw (registerWithEntry itself would have rejected), and
+    // the well-formed event right after still landed normally.
+    const costCounter = telemetry.meter.createCounter.mock.results[0]?.value;
+    expect(costCounter.add).toHaveBeenCalledWith(0.05, expect.any(Object));
+  });
+
   it("ignores non-function direct exports", async () => {
     const root = makeInstallRoot();
     writeChunk(root, "export const onInternalDiagnosticEvent = 'not-a-function';\n");

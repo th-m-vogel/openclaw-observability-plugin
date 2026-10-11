@@ -154,6 +154,158 @@ describe("plugin service lifecycle", () => {
     expect(registerDiagnosticsListener).toHaveBeenCalled();
   });
 
+  it("a non-full register() reaching the SAME module instance as a live full registration leaves it untouched", async () => {
+    // Regression test for a latent ordering bug: register() used to call
+    // teardownActiveRegistration() and overwrite activeRegistration /
+    // gatewayStopFinalizer unconditionally, BEFORE checking whether this
+    // call is itself a full registration. If a non-full register() ever
+    // reached the same module instance as an already-live full one (e.g.
+    // via the ESM module cache, rather than the separate instance the
+    // "discovery" mechanism normally creates), it would silently tear
+    // down the live registration's hooks/diagnostics/telemetry with
+    // nothing to re-create them, since init is skipped for a non-full
+    // call — and gateway_stop would then flush a finalizer pointing at
+    // telemetry: null.
+    vi.resetModules();
+
+    const shutdownFirst = vi.fn().mockResolvedValue(undefined);
+    const stopHooksFirst = vi.fn();
+    const unsubscribeDiagnosticsFirst = vi.fn();
+    const restoreLoggerFirst = vi.fn();
+
+    const initTelemetry = vi.fn(() => ({ shutdown: shutdownFirst }));
+    const registerHooks = vi.fn(() => stopHooksFirst);
+    const registerDiagnosticsListener = vi.fn().mockResolvedValue(unsubscribeDiagnosticsFirst);
+    const initLogPipeline = vi.fn(() => null);
+
+    vi.doMock("../src/telemetry.js", () => ({
+      initTelemetry,
+      hasPreloadedOtelSdk: vi.fn(() => false),
+    }));
+    vi.doMock("../src/openllmetry.js", () => ({
+      initOpenLLMetry: vi.fn(),
+    }));
+    vi.doMock("../src/hooks.js", () => ({
+      registerHooks,
+    }));
+    vi.doMock("../src/diagnostics.js", () => ({
+      registerDiagnosticsListener,
+      hasDiagnosticsSupport: vi.fn(() => true),
+    }));
+    vi.doMock("../src/logs.js", () => ({
+      initLogPipeline,
+      bridgeGatewayLogger: vi.fn(() => restoreLoggerFirst),
+    }));
+
+    const plugin = (await import("../index.js")).default;
+
+    let gatewayStopCallback: (() => Promise<void>) | null = null;
+    const makeApi = (registrationMode: string | undefined) => {
+      const api: Record<string, unknown> = {
+        logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        pluginConfig: { endpoint: "http://127.0.0.1:14318", traces: true, metrics: true, logs: true },
+        registerGatewayMethod: vi.fn(),
+        registerCli: vi.fn(),
+        registerService: vi.fn(),
+        registerTool: vi.fn(),
+        on: vi.fn((event: string, cb: () => Promise<void>) => {
+          if (event === "gateway_stop") gatewayStopCallback = cb;
+        }),
+      };
+      if (registrationMode !== undefined) api.registrationMode = registrationMode;
+      return api;
+    };
+
+    // First call: a real, live "full" registration.
+    const apiFull = makeApi("full");
+    plugin.register(apiFull);
+    await Promise.resolve();
+
+    expect(initTelemetry).toHaveBeenCalledTimes(1);
+    expect(registerHooks).toHaveBeenCalledTimes(1);
+    expect(gatewayStopCallback).not.toBeNull();
+
+    // Second call, same module instance: a non-full registration (the
+    // scenario this test exists for).
+    const apiDiscovery = makeApi("discovery");
+    plugin.register(apiDiscovery);
+    await Promise.resolve();
+
+    // The non-full call must not have torn anything down or re-initialized.
+    expect(shutdownFirst).not.toHaveBeenCalled();
+    expect(stopHooksFirst).not.toHaveBeenCalled();
+    expect(unsubscribeDiagnosticsFirst).not.toHaveBeenCalled();
+    expect(initTelemetry).toHaveBeenCalledTimes(1);
+    expect(registerHooks).toHaveBeenCalledTimes(1);
+
+    // gateway_stop must still flush the FIRST (live) registration's real
+    // telemetry, not a finalizer left pointing at a torn-down/null one.
+    await gatewayStopCallback!();
+    expect(shutdownFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it("a diagnostics subscription that resolves AFTER stop() is unsubscribed immediately, not kept live", async () => {
+    // registerDiagnosticsListener() awaits internally (loadSdk() etc.), so
+    // it can resolve after stop() (or a fresh register()) already ran.
+    // Stashing that late `unsub` as this registration's live subscription
+    // would leak a still-attached listener nothing else knows to call —
+    // the same stacked-listener shape #166289 was caused by.
+    vi.resetModules();
+
+    let resolveSubscription: ((unsub: () => void) => void) | null = null;
+    const lateUnsub = vi.fn();
+    const registerDiagnosticsListener = vi.fn(
+      () => new Promise<() => void>((resolve) => { resolveSubscription = resolve; }),
+    );
+
+    vi.doMock("../src/telemetry.js", () => ({
+      initTelemetry: vi.fn(() => ({ shutdown: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined) })),
+      hasPreloadedOtelSdk: vi.fn(() => false),
+    }));
+    vi.doMock("../src/openllmetry.js", () => ({
+      initOpenLLMetry: vi.fn(),
+    }));
+    vi.doMock("../src/hooks.js", () => ({
+      registerHooks: vi.fn(() => vi.fn()),
+    }));
+    vi.doMock("../src/diagnostics.js", () => ({
+      registerDiagnosticsListener,
+      hasDiagnosticsSupport: vi.fn(() => true),
+    }));
+    vi.doMock("../src/logs.js", () => ({
+      initLogPipeline: vi.fn(() => null),
+      bridgeGatewayLogger: vi.fn(),
+    }));
+
+    const services: Array<{ stop?: () => Promise<void> }> = [];
+    const api = {
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      pluginConfig: { endpoint: "http://127.0.0.1:14318", traces: true, metrics: true, logs: false },
+      registerGatewayMethod: vi.fn(),
+      registerCli: vi.fn(),
+      registerService: vi.fn((service) => services.push(service)),
+      registerTool: vi.fn(),
+      on: vi.fn(),
+    };
+
+    const plugin = (await import("../index.js")).default;
+    plugin.register(api);
+    await Promise.resolve();
+
+    expect(registerDiagnosticsListener).toHaveBeenCalledTimes(1);
+    expect(resolveSubscription).not.toBeNull();
+
+    // stop() runs BEFORE the subscription promise ever settles.
+    await services[0]!.stop?.();
+
+    // Now the late subscription resolves.
+    resolveSubscription!(lateUnsub);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(lateUnsub).toHaveBeenCalledTimes(1);
+  });
+
   it("stop flushes telemetry without destructively shutting providers down", async () => {
     vi.resetModules();
 
