@@ -708,7 +708,7 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
 
     resolve({}, { agentId: "main", sessionKey: "agent:main:new" });
     modelStarted(
-      { sessionKey: "agent:main:new", model: "Qwen/Qwen3.5-397B-A17B", provider: "ionos", agentId: "main" },
+      { sessionKey: "agent:main:new", model: "Qwen/Qwen3.5-397B-A17B", provider: "custom-provider", agentId: "main" },
       { sessionKey: "agent:main:new" },
     );
     modelEnded(
@@ -728,8 +728,8 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
     const expectedAttrs = expect.objectContaining({
       "gen_ai.response.model": "Qwen/Qwen3.5-397B-A17B",
       "gen_ai.conversation.id": "agent:main:new",
-      "gen_ai.provider.name": "ionos",
-      "openclaw.provider": "ionos",
+      "gen_ai.provider.name": "custom-provider",
+      "openclaw.provider": "custom-provider",
     });
     expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
     expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();

@@ -247,7 +247,7 @@ describe("internal diagnostics export resolution", () => {
         const payload = {
           type: "model.usage",
           sessionKey: "agent:main:new",
-          provider: "ionos",
+          provider: "custom-provider",
           model: "Qwen/Qwen3.5-397B-A17B",
           usage: { input: 226167, output: 3738, total: 229905 },
           costUsd: 0.1666,
@@ -281,11 +281,11 @@ describe("internal diagnostics export resolution", () => {
       root,
       `export function onInternalDiagnosticEvent(listener) {
         listener({
-          type: "model.usage", sessionKey: "agent:main:ionos-twt", provider: "openai",
+          type: "model.usage", sessionKey: "agent:main:custom-session", provider: "openai",
           model: "gpt-5.6-luna", usage: { total: 287134 }, costUsd: 0.05110000000001,
         });
         listener({
-          type: "model.usage", sessionKey: "agent:main:ionos-twt", provider: "openai",
+          type: "model.usage", sessionKey: "agent:main:custom-session", provider: "openai",
           model: "gpt-5.6-luna", usage: { total: 287134 }, costUsd: 0.05109999999998,
         });
         return () => undefined;
@@ -309,11 +309,11 @@ describe("internal diagnostics export resolution", () => {
       root,
       `export function onInternalDiagnosticEvent(listener) {
         listener({
-          type: "model.usage", sessionKey: "agent:main:new", provider: "ionos",
+          type: "model.usage", sessionKey: "agent:main:new", provider: "custom-provider",
           model: "Qwen/Qwen3.5-397B-A17B", usage: { total: 1000 }, costUsd: 0.01,
         });
         listener({
-          type: "model.usage", sessionKey: "agent:main:new", provider: "ionos",
+          type: "model.usage", sessionKey: "agent:main:new", provider: "custom-provider",
           model: "Qwen/Qwen3.5-397B-A17B", usage: { total: 2000 }, costUsd: 0.02,
         });
         return () => undefined;
