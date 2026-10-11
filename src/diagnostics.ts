@@ -315,7 +315,14 @@ export async function registerDiagnosticsListener(
   const { counters, histograms } = telemetry;
 
   const unsubscribe = eventSource((evt: any) => {
-    
+    // Unlike every api.on() hook handler (all individually try/catch'd),
+    // this listener runs directly inside core's dispatcher with no
+    // isolation of its own. A malformed event (evt null, costUsd truthy
+    // but non-numeric, etc.) throwing here would propagate into core's
+    // emit site — whether core isolates listener exceptions is
+    // unverified, so this is the one place in the plugin that could
+    // break a real model-call path on a bad event shape.
+    try {
     // ISI-1017: Queue events
     if (evt.type === "queue.lane.enqueue") {
       const { lane, depth, waitMs } = evt;
@@ -626,6 +633,9 @@ export async function registerDiagnosticsListener(
     }
 
     logger.debug?.(`[otel] model.usage: session=${sessionKey}, model=${model}, cost=$${costUsd?.toFixed(4) || "?"}, tokens=${usage.total || "?"}`);
+    } catch (err) {
+      logger.error?.(`[otel] diagnostics listener error: ${err instanceof Error ? err.message : String(err)}`);
+    }
   });
 
   logger.info("[otel] Subscribed to OpenClaw diagnostic events (model.usage, etc.)");
