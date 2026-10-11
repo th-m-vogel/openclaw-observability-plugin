@@ -13,6 +13,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { TelemetryRuntime } from "./telemetry.js";
 import {
+  GEN_AI_AGENT_ID,
   GEN_AI_CONVERSATION_ID,
   GEN_AI_OPERATION_NAME,
   GEN_AI_PROVIDER_NAME,
@@ -22,6 +23,7 @@ import {
   GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
   GEN_AI_USAGE_INPUT_TOKENS,
   GEN_AI_USAGE_OUTPUT_TOKENS,
+  OP_CHAT,
   OP_INVOKE_AGENT,
   OC_PROVIDER,
   TOKEN_TYPE_INPUT,
@@ -69,7 +71,7 @@ async function loadSdk(): Promise<void> {
   }
 }
 
-type DiagnosticsLogger = { debug?: (message: string) => void };
+type DiagnosticsLogger = { debug?: (message: string) => void; warn?: (message: string) => void };
 
 // Direct access to internal diagnostic events (preferred - bypasses SDK wrapper)
 let onInternalDiagnosticEvent: DiagnosticEventSource | null = null;
@@ -182,6 +184,75 @@ async function loadInternalDiagnostics(logger?: DiagnosticsLogger): Promise<void
   onInternalDiagnosticEvent = await loadInternalDiagnosticEventSource(process.argv[1], logger);
 }
 
+/**
+ * Minimum OpenClaw version this plugin supports for real per-call token
+ * metrics — the release confirmed (commit b2d6842c547d, ancestor of the
+ * v2026.9.8 tag) to spread `observer.usageField()` onto `model.call.completed`
+ * / `model.call.error` internal diagnostic events. Older installs still load
+ * this plugin fine; they just won't have `openclaw.llm.tokens.*` data, since
+ * those events won't carry a `usage` field to read.
+ */
+export const MIN_SUPPORTED_OPENCLAW_VERSION = "2026.9.8";
+
+function resolveOpenclawInstallRoot(entryFile: string | undefined): string | undefined {
+  if (!entryFile) return undefined;
+  const resolvedEntry = safeRealpath(entryFile);
+  const entryDir = path.dirname(resolvedEntry);
+  const entryParent = path.basename(entryDir);
+  return entryParent === "dist" || entryParent === "src"
+    ? path.dirname(entryDir)
+    : entryDir;
+}
+
+function readInstalledOpenclawVersion(installRoot: string | undefined): string | undefined {
+  if (!installRoot) return undefined;
+  try {
+    const raw = fs.readFileSync(path.join(installRoot, "package.json"), "utf8");
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === "string" ? parsed.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Compares two dot-separated, OpenClaw-style `YYYY.M.D` version strings.
+ * Returns negative if `a` < `b`, positive if `a` > `b`, 0 if equal.
+ * Each segment is read with `parseInt`, which stops at the first
+ * non-digit character — good enough to not misjudge a pre-release string
+ * like "2026.9.8-canary.3" (reads as 2026.9.8) as older than it is, with
+ * no `semver` dependency needed for OpenClaw's actual version shape.
+ */
+function compareVersions(a: string, b: string): number {
+  const partsA = a.split(".");
+  const partsB = b.split(".");
+  const len = Math.max(partsA.length, partsB.length);
+  for (let i = 0; i < len; i++) {
+    const numA = Number.parseInt(partsA[i] ?? "0", 10) || 0;
+    const numB = Number.parseInt(partsB[i] ?? "0", 10) || 0;
+    if (numA !== numB) return numA - numB;
+  }
+  return 0;
+}
+
+let minVersionCheckDone = false;
+
+function checkMinimumOpenclawVersion(entryFile: string | undefined, logger?: DiagnosticsLogger): void {
+  if (minVersionCheckDone) return;
+  minVersionCheckDone = true;
+  const installedVersion = readInstalledOpenclawVersion(resolveOpenclawInstallRoot(entryFile));
+  if (!installedVersion) {
+    logger?.debug?.("[otel] Could not determine installed OpenClaw version; skipping minimum-version check");
+    return;
+  }
+  if (compareVersions(installedVersion, MIN_SUPPORTED_OPENCLAW_VERSION) < 0) {
+    logger?.warn?.(
+      `[otel] Detected OpenClaw v${installedVersion}, below this plugin's minimum supported version v${MIN_SUPPORTED_OPENCLAW_VERSION}. ` +
+      `Real per-call token metrics (openclaw.llm.tokens.*) require v${MIN_SUPPORTED_OPENCLAW_VERSION}+ and will be missing or incomplete on this install. See docs/limitations.md.`
+    );
+  }
+}
+
 /** Pending usage data waiting to be attached to spans */
 interface PendingUsageData {
   costUsd?: number;
@@ -204,6 +275,19 @@ interface PendingUsageData {
 /** Map of sessionKey → pending usage data from diagnostic events */
 const pendingUsageMap = new Map<string, PendingUsageData>();
 
+/**
+ * Dedup guard against openclaw/openclaw#166289 — core double-dispatches the
+ * `model.usage` diagnostic event for a subset of calls (confirmed core-side,
+ * not caused by this plugin). Keyed on content, not identity, since the two
+ * dispatches are otherwise byte-identical and arrive ~1ms apart. Only needs
+ * to protect what's *exclusively* recorded from this event (cost, and the
+ * system/user/tool_result/skill token breakdown) — the primary token/request
+ * metrics now come from the per-call `model_call_started`/`model_call_ended`
+ * hooks in hooks.ts, which are tied to a real call and unaffected by this.
+ */
+const recentUsageEvents = new Map<string, number>();
+const DUPLICATE_WINDOW_MS = 5_000;
+
 /** Map of sessionKey → active agent span (set by hooks.ts) */
 export const activeAgentSpans = new Map<string, Span>();
 
@@ -218,19 +302,27 @@ export async function registerDiagnosticsListener(
   // Load the SDK if not already loaded
   await loadSdk();
   await loadInternalDiagnostics(logger);
+  checkMinimumOpenclawVersion(process.argv[1], logger);
 
   // Use internal diagnostic events if available, otherwise fall back to SDK
   const eventSource = onInternalDiagnosticEvent || onDiagnosticEvent;
   
   if (!eventSource) {
-    logger.warn?.("[otel] No diagnostic event source available — using fallback token extraction");
+    logger.warn?.("[otel] No diagnostic event source available — openclaw.llm.tokens.* and .cost.usd will not be recorded");
     return () => {};
   }
 
   const { counters, histograms } = telemetry;
 
   const unsubscribe = eventSource((evt: any) => {
-    
+    // Unlike every api.on() hook handler (all individually try/catch'd),
+    // this listener runs directly inside core's dispatcher with no
+    // isolation of its own. A malformed event (evt null, costUsd truthy
+    // but non-numeric, etc.) throwing here would propagate into core's
+    // emit site — whether core isolates listener exceptions is
+    // unverified, so this is the one place in the plugin that could
+    // break a real model-call path on a bad event shape.
+    try {
     // ISI-1017: Queue events
     if (evt.type === "queue.lane.enqueue") {
       const { lane, depth, waitMs } = evt;
@@ -362,6 +454,84 @@ export async function registerDiagnosticsListener(
       return;
     }
 
+    // 0.12.0+: real per-call token usage. Unlike `model_call_started`/
+    // `model_call_ended` (the plugin *hooks*, confirmed to carry no usage
+    // field — see hooks.ts), these are `onInternalDiagnosticEvent`
+    // *diagnostic events* — a different mechanism, verified live against
+    // OpenClaw v2026.9.8 to spread `observer.usageField()` (call-scoped,
+    // read from that call's own terminal provider response) onto the
+    // payload. Fires once per real model API call, unconditionally —
+    // same reliability class as the per-call request/duration hooks in
+    // hooks.ts — so no fallback is needed the way `model.usage` (a
+    // turn-level event) needed one. See openclaw/openclaw#166623.
+    //
+    // No dedup guard needed here against #166289 specifically: that bug
+    // is core double-dispatching the `model.usage` event itself (a
+    // separate emission site). `model.call.completed`/`model.call.error`
+    // are emitted from `emitModelCallEnded`, which core guards with its
+    // own one-shot `observer.state.terminalEventEmitted` flag per call
+    // (checked directly in OpenClaw's installed source) — a structurally
+    // different, call-scoped idempotency mechanism, not the thing #166289
+    // is about. If a *different* double-dispatch bug is ever found on
+    // these events specifically, add a guard the same way the `model.usage`
+    // handler below does (keyed on session/model/usage, not event identity).
+    if (evt.type === "model.call.completed" || evt.type === "model.call.error") {
+      const usage = evt.usage;
+      if (!usage) return;
+
+      const sessionKey = evt.sessionKey || "unknown";
+      const model = evt.model || "unknown";
+      const metricAttrs: Record<string, string> = {
+        [GEN_AI_RESPONSE_MODEL]: model,
+        [GEN_AI_OPERATION_NAME]: OP_CHAT,
+        [GEN_AI_CONVERSATION_ID]: sessionKey,
+      };
+      if (evt.provider && evt.provider !== "unknown") {
+        metricAttrs[GEN_AI_PROVIDER_NAME] = evt.provider;
+        metricAttrs[OC_PROVIDER] = evt.provider;
+      }
+      if (evt.agentId && evt.agentId !== "unknown") {
+        metricAttrs[GEN_AI_AGENT_ID] = evt.agentId;
+      }
+
+      if (usage.input) {
+        counters.tokensPrompt.add(usage.input, metricAttrs);
+        histograms.genAiTokenUsage.record(usage.input, {
+          ...metricAttrs,
+          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
+        });
+      }
+      if (usage.output) {
+        counters.tokensCompletion.add(usage.output, metricAttrs);
+        histograms.genAiTokenUsage.record(usage.output, {
+          ...metricAttrs,
+          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
+        });
+      }
+      if (usage.cacheRead) {
+        counters.tokensPrompt.add(usage.cacheRead, { ...metricAttrs, "token.type": "cache_read" });
+        histograms.genAiTokenUsage.record(usage.cacheRead, {
+          ...metricAttrs,
+          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
+        });
+      }
+      if (usage.cacheWrite) {
+        counters.tokensPrompt.add(usage.cacheWrite, { ...metricAttrs, "token.type": "cache_write" });
+        histograms.genAiTokenUsage.record(usage.cacheWrite, {
+          ...metricAttrs,
+          [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
+        });
+      }
+      if (usage.total) {
+        counters.tokensTotal.add(usage.total, metricAttrs);
+      }
+
+      logger.debug?.(
+        `[otel] ${evt.type}: session=${sessionKey}, model=${model}, tokens=${usage.total ?? "?"}`
+      );
+      return;
+    }
+
     if (evt.type !== "model.usage") return;
 
     const sessionKey = evt.sessionKey || "unknown";
@@ -380,7 +550,6 @@ export async function registerDiagnosticsListener(
       model,
     });
 
-    // Record metrics immediately (don't wait for span).
     // Stable GenAI attribute keys only — `gen_ai.system` dropped in schema
     // 1.3.0 (ISI-1004). `openclaw.provider` (legacy mirror) is retained.
     const metricAttrs = {
@@ -391,69 +560,72 @@ export async function registerDiagnosticsListener(
       [OC_PROVIDER]: provider,
     };
 
-    if (usage.input) {
-      counters.tokensPrompt.add(usage.input, metricAttrs);
-      histograms.genAiTokenUsage.record(usage.input, {
-        ...metricAttrs,
-        [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
-      });
-    }
-    if (usage.output) {
-      counters.tokensCompletion.add(usage.output, metricAttrs);
-      histograms.genAiTokenUsage.record(usage.output, {
-        ...metricAttrs,
-        [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
-      });
-    }
-    if (usage.cacheRead) {
-      counters.tokensPrompt.add(usage.cacheRead, { ...metricAttrs, "token.type": "cache_read" });
-      histograms.genAiTokenUsage.record(usage.cacheRead, {
-        ...metricAttrs,
-        [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
-      });
-    }
-    if (usage.cacheWrite) {
-      counters.tokensPrompt.add(usage.cacheWrite, { ...metricAttrs, "token.type": "cache_write" });
-      histograms.genAiTokenUsage.record(usage.cacheWrite, {
-        ...metricAttrs,
-        [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
-      });
-    }
-    if (usage.total) {
-      counters.tokensTotal.add(usage.total, metricAttrs);
-    }
-
-    // ISI-1018: Token breakdown by type (system, user, tool_result, skill)
-    if (usage.system) {
-      counters.tokensSystem.add(usage.system, metricAttrs);
-    }
-    if (usage.user) {
-      counters.tokensUser.add(usage.user, metricAttrs);
-    }
-    if (usage.toolResult) {
-      counters.tokensToolResult.add(usage.toolResult, metricAttrs);
-    }
-    if (usage.skill) {
-      counters.tokensSkill.add(usage.skill, metricAttrs);
+    // NOTE (0.11.0): request-count and duration metrics moved to the
+    // per-call `model_call_started`/`model_call_ended` hooks in hooks.ts,
+    // which fire once per real model API call rather than once per *agent
+    // turn* like this event (a turn may cover several real calls — see a
+    // trace with several `chat {model}` spans under one `openclaw.agent.turn`
+    // for an example) and are immune to this event's known core-side
+    // double-dispatch bug (openclaw/openclaw#166289) since they're tied to
+    // a real, individually-identified call.
+    //
+    // NOTE (0.12.0): `openclaw.llm.tokens.*` moved the same way, onto the
+    // `model.call.completed`/`model.call.error` diagnostic events above —
+    // real per-call usage, confirmed available since OpenClaw v2026.9.8
+    // (openclaw/openclaw#166623). What stays here: cost (no per-call cost
+    // field exists anywhere in the plugin API) and the ISI-1018
+    // system/user/tool_result/skill breakdown (not present in per-call
+    // usage either). Both still need the dedup guard below, since this
+    // event can still double-dispatch (#166289).
+    // Round cost/tokens before keying the dedup map: a duplicate dispatch
+    // can recompute cost with a tiny floating-point difference (identical
+    // at the precision the debug log below displays, different in full
+    // precision), which would otherwise defeat this guard entirely — found
+    // live on a gpt-5.6-luna session where an exact-looking duplicate
+    // ($0.0511 both times) was never caught, double-counting its cost.
+    const costKey = typeof costUsd === "number" ? costUsd.toFixed(4) : "?";
+    const totalKey = typeof usage.total === "number" ? Math.round(usage.total) : "?";
+    const dedupKey = `${sessionKey}|${model}|${costKey}|${totalKey}`;
+    const now = Date.now();
+    const lastSeen = recentUsageEvents.get(dedupKey);
+    const isDuplicate = typeof lastSeen === "number" && now - lastSeen < DUPLICATE_WINDOW_MS;
+    recentUsageEvents.set(dedupKey, now);
+    if (recentUsageEvents.size > 500) {
+      for (const [k, ts] of recentUsageEvents) {
+        if (now - ts > DUPLICATE_WINDOW_MS) recentUsageEvents.delete(k);
+      }
     }
 
-    // Record cost metric
-    if (typeof costUsd === "number" && costUsd > 0) {
-      telemetry.meter.createCounter("openclaw.llm.cost.usd", {
-        description: "Estimated LLM cost in USD",
-        unit: "usd",
-      }).add(costUsd, metricAttrs);
+    if (!isDuplicate) {
+      // ISI-1018: Token breakdown by type (system, user, tool_result, skill)
+      if (usage.system) {
+        counters.tokensSystem.add(usage.system, metricAttrs);
+      }
+      if (usage.user) {
+        counters.tokensUser.add(usage.user, metricAttrs);
+      }
+      if (usage.toolResult) {
+        counters.tokensToolResult.add(usage.toolResult, metricAttrs);
+      }
+      if (usage.skill) {
+        counters.tokensSkill.add(usage.skill, metricAttrs);
+      }
+
+      // Record cost metric
+      if (typeof costUsd === "number" && costUsd > 0) {
+        telemetry.meter.createCounter("openclaw.llm.cost.usd", {
+          description: "Estimated LLM cost in USD",
+          unit: "usd",
+        }).add(costUsd, metricAttrs);
+      }
+    } else {
+      logger.debug?.(
+        `[otel] model.usage: suppressed duplicate dispatch (openclaw/openclaw#166289) for session=${sessionKey}, cost=$${costUsd?.toFixed(4) || "?"}, tokens=${usage.total || "?"}`
+      );
     }
 
-    // Record LLM duration — legacy (ms) and stable GenAI (seconds).
-    if (typeof evt.durationMs === "number") {
-      histograms.llmDuration.record(evt.durationMs, metricAttrs);
-      histograms.genAiOperationDuration.record(evt.durationMs / 1000, metricAttrs);
-    }
-
-    counters.llmRequests.add(1, metricAttrs);
-
-    // If we have an active agent span for this session, enrich it now
+    // Span enrichment overwrites the same attributes either way, so it's
+    // safe to run regardless of the dedup check above.
     const agentSpan = activeAgentSpans.get(sessionKey);
     if (agentSpan) {
       enrichSpanWithUsage(agentSpan, evt);
@@ -461,6 +633,9 @@ export async function registerDiagnosticsListener(
     }
 
     logger.debug?.(`[otel] model.usage: session=${sessionKey}, model=${model}, cost=$${costUsd?.toFixed(4) || "?"}, tokens=${usage.total || "?"}`);
+    } catch (err) {
+      logger.error?.(`[otel] diagnostics listener error: ${err instanceof Error ? err.message : String(err)}`);
+    }
   });
 
   logger.info("[otel] Subscribed to OpenClaw diagnostic events (model.usage, etc.)");

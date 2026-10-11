@@ -72,6 +72,10 @@ export interface LegacyTraceContext {
   llmStartTime?: number;
   modelCallSpan?: Span;
   modelCallStartTime?: number;
+  /** Request-side attrs captured at `model_call_started`, needed again at
+   *  `model_call_ended` to label per-call metrics. */
+  modelCallProvider?: string;
+  modelCallAgentId?: string;
   dispatchSpan?: Span;
   dispatchStartTime?: number;
   activeToolSpans?: Map<string, ActiveToolSpan>;
@@ -402,7 +406,14 @@ export class TraceContextStore {
     this.activeRequestKey.delete(sessionKey);
     this.activeTurnKey.delete(sessionKey);
     this.subAgentLinks.delete(sessionKey);
-    this.sessions.delete(sessionKey);
+    // Deliberately NOT deleting the session tier (`this.sessions`) here.
+    // This method runs on every `agent_end` (end of one turn), but a
+    // session's `openclaw.session` span spans many turns and is only
+    // ended/deleted by `session_end` (via `deleteSession`). Deleting it
+    // here meant the span from the first turn's `session_start` never
+    // got `.end()`ed or exported, `gauges.activeSessions` only ever
+    // incremented (the matching `session_end` decrement found nothing to
+    // act on), and every subsequent turn opened a brand new session span.
     this.activeContexts.delete(sessionKey);
   }
 

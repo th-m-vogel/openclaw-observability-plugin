@@ -158,6 +158,7 @@ function createTelemetry(): { telemetry: TelemetryRuntime; spans: Array<Span & S
       agentTurnDuration: noopHistogram(),
       genAiTokenUsage: noopHistogram(),
       genAiOperationDuration: noopHistogram(),
+      llmDuration: noopHistogram(),
       toolCallDuration: noopHistogram(),
       cronDuration: noopHistogram(),
       subagentDuration: noopHistogram(),
@@ -694,6 +695,116 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
     expect(chatSpan!.ended).toBe(true);
 
     stopHooks();
+  });
+
+  it("model_call_ended records per-call request/duration metrics labeled with conversation id + provider (0.11.0+), but not tokens (real usage data isn't available on this event)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const modelStarted = typedHooks.get("model_call_started")!;
+    const modelEnded = typedHooks.get("model_call_ended")!;
+
+    resolve({}, { agentId: "main", sessionKey: "agent:main:new" });
+    modelStarted(
+      { sessionKey: "agent:main:new", model: "Qwen/Qwen3.5-397B-A17B", provider: "custom-provider", agentId: "main" },
+      { sessionKey: "agent:main:new" },
+    );
+    modelEnded(
+      {
+        sessionKey: "agent:main:new",
+        responseModel: "Qwen/Qwen3.5-397B-A17B",
+        // Real production events carry no `usage` at all on this hook —
+        // see the NOTE in hooks.ts's model_call_ended. Included here only
+        // to prove it's ignored for metrics, not to assert this shape is
+        // realistic.
+        usage: { input: 40969, output: 369, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+        durationMs: 2500,
+      },
+      { sessionKey: "agent:main:new" },
+    );
+
+    const expectedAttrs = expect.objectContaining({
+      "gen_ai.response.model": "Qwen/Qwen3.5-397B-A17B",
+      "gen_ai.conversation.id": "agent:main:new",
+      "gen_ai.provider.name": "custom-provider",
+      "openclaw.provider": "custom-provider",
+    });
+    expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensTotal.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.llmRequests.add).toHaveBeenCalledWith(1, expectedAttrs);
+    expect(telemetry.histograms.llmDuration.record).toHaveBeenCalledWith(2500, expectedAttrs);
+    expect(telemetry.histograms.genAiOperationDuration.record).toHaveBeenCalledWith(2.5, expectedAttrs);
+
+    stopHooks();
+  });
+
+  it("model_call_ended records llmErrors on the new per-call path when event.error is set", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const modelStarted = typedHooks.get("model_call_started")!;
+    const modelEnded = typedHooks.get("model_call_ended")!;
+
+    resolve({}, { agentId: "main", sessionKey: "s-err" });
+    modelStarted(
+      { sessionKey: "s-err", model: "claude-3.5-sonnet", provider: "anthropic", agentId: "main" },
+      { sessionKey: "s-err" },
+    );
+    modelEnded(
+      { sessionKey: "s-err", responseModel: "claude-3.5-sonnet", error: "boom", usage: { input: 10, output: 0 } },
+      { sessionKey: "s-err" },
+    );
+
+    expect(telemetry.counters.llmErrors.add).toHaveBeenCalledWith(1, expect.any(Object));
+
+    stopHooks();
+  });
+
+  it("agent_end no longer records a token-count metric fallback when model.usage never fired for this turn (0.12.0+: tokens come from diagnostics.ts's model.call.completed/model.call.error instead)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const received = typedHooks.get("message_received")!;
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const agentEnd = typedHooks.get("agent_end")!;
+
+    return Promise.resolve(
+      received({ channel: "cli", sessionKey: "s-fallback", from: "user" }, { sessionKey: "s-fallback" }),
+    ).then(() => {
+      resolve({}, { agentId: "main", sessionKey: "s-fallback" });
+      // No model.usage diagnostic event was ever dispatched for this
+      // session (diagnostics.getPendingUsage("s-fallback") is undefined),
+      // the same situation the old fallback used to react to.
+      return Promise.resolve(
+        agentEnd(
+          {
+            success: true,
+            durationMs: 42,
+            messages: [
+              { role: "assistant", model: "gpt-fallback", usage: { input: 500, output: 50 } },
+            ],
+          },
+          { agentId: "main", sessionKey: "s-fallback" },
+        ),
+      );
+    }).then(() => {
+      // Counter metrics are NOT recorded here any more — real per-call
+      // tokens come unconditionally from diagnostics.ts's
+      // model.call.completed/model.call.error handling (see
+      // diagnostics.test.ts), independent of whether model.usage fires.
+      expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
+      expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();
+      expect(telemetry.counters.tokensTotal.add).not.toHaveBeenCalled();
+      expect(telemetry.counters.llmRequests.add).not.toHaveBeenCalled();
+
+      stopHooks();
+    });
   });
 
   it("model_call_ended emits gen_ai.response.finish_reasons as string[] (ISI-993)", () => {
@@ -1508,6 +1619,68 @@ describe("session_start / session_end hooks (ISI-928)", () => {
 
     stopHooks();
   });
+
+  it("session span survives an agent_end (one turn) and still ends cleanly at session_end", async () => {
+    // Regression test: agent_end runs cleanupSession() on every turn, long
+    // before the session itself ends. cleanupSession() used to also delete
+    // the session tier, which meant the first turn's agent_end silently
+    // orphaned the session span (never .end()ed, never exported) and
+    // session_end found nothing left to act on — the activeSessions gauge
+    // only ever incremented, never decremented.
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const sessionStart = typedHooks.get("session_start")!;
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const agentEnd = typedHooks.get("agent_end")!;
+    const sessionEnd = typedHooks.get("session_end")!;
+
+    await sessionStart(
+      { sessionKey: "sess-multi-turn", channel: "cli", agentId: "a1" },
+      { sessionKey: "sess-multi-turn" },
+    );
+
+    const sessionSpan = spans.find((s) => s.spanName === "openclaw.session");
+    expect(sessionSpan).toBeDefined();
+
+    // First turn.
+    resolve({}, { agentId: "a1", sessionKey: "sess-multi-turn" });
+    await agentEnd(
+      { success: true, messages: [], durationMs: 50 },
+      { agentId: "a1", sessionKey: "sess-multi-turn" },
+    );
+
+    // The session span must still be open after one turn — a session
+    // outlives any single turn.
+    expect(sessionSpan!.ended).toBe(false);
+
+    // Second turn, same session.
+    resolve({}, { agentId: "a1", sessionKey: "sess-multi-turn" });
+    await agentEnd(
+      { success: true, messages: [], durationMs: 50 },
+      { agentId: "a1", sessionKey: "sess-multi-turn" },
+    );
+    expect(sessionSpan!.ended).toBe(false);
+
+    // No duplicate "openclaw.session" span should have been created across
+    // either turn (the "already active" guard in session_start only works
+    // if the session tier actually survives).
+    expect(spans.filter((s) => s.spanName === "openclaw.session").length).toBe(1);
+
+    await sessionEnd(
+      { sessionKey: "sess-multi-turn", reason: "user_closed" },
+      { sessionKey: "sess-multi-turn" },
+    );
+
+    expect(sessionSpan!.ended).toBe(true);
+    expect(telemetry.gauges.activeSessions.add).toHaveBeenCalledWith(1, expect.any(Object));
+    expect(telemetry.gauges.activeSessions.add).toHaveBeenCalledWith(-1, expect.any(Object));
+    // Net effect across the whole session lifecycle: one +1, one -1.
+    expect(telemetry.gauges.activeSessions.add).toHaveBeenCalledTimes(2);
+
+    stopHooks();
+  });
 });
 
 describe("gen_ai.provider.name propagation (ISI-928)", () => {
@@ -2021,6 +2194,56 @@ describe("subagent_spawning / subagent_delivery_target / subagent_ended hooks (I
       1,
       expect.objectContaining({ "openclaw.subagent.child_agent_name": "child-agent" }),
     );
+
+    stopHooks();
+  });
+
+  it("subagent_ended does not record token-metric counters, even when the event carries usage (avoids double-counting against the per-call path)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const spawning = typedHooks.get("subagent_spawning")!;
+    const ended = typedHooks.get("subagent_ended")!;
+
+    resolve({}, { agentId: "parent-agent", sessionKey: "parent-sess-usage" });
+    spawning(
+      {
+        childSessionKey: "child-sess-usage",
+        childAgentId: "child-agent",
+        childAgentName: "child-agent",
+        reason: "delegation",
+      },
+      { sessionKey: "parent-sess-usage", agentId: "parent-agent" },
+    );
+
+    ended(
+      {
+        childSessionKey: "child-sess-usage",
+        parentSessionKey: "parent-sess-usage",
+        success: true,
+        durationMs: 500,
+        childAgentId: "child-agent",
+        childAgentName: "child-agent",
+        model: "claude-sonnet-5",
+        usage: { input: 1000, output: 200 },
+      },
+      { sessionKey: "parent-sess-usage" },
+    );
+
+    // The per-call model.call.completed/.error path already counts this
+    // child session's real token usage; subagent_ended must not record it
+    // a second time under its own, incompatible label schema.
+    expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensTotal.add).not.toHaveBeenCalled();
+
+    // The span attributes (trace-level usage, not a metric) still carry it.
+    const spawnSpan = spans.find((s) => s.spanName === "openclaw.subagent.spawning");
+    expect(spawnSpan!.attrs["gen_ai.usage.input_tokens"]).toBe(1000);
+    expect(spawnSpan!.attrs["gen_ai.usage.output_tokens"]).toBe(200);
+    expect(spawnSpan!.attrs["openclaw.subagent.tokens_total"]).toBe(1200);
 
     stopHooks();
   });

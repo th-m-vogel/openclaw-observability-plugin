@@ -14,7 +14,7 @@
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -48,6 +48,23 @@ describe("PLUGIN_VERSION (ISI-995)", () => {
     // for whatever reason.
     expect(PLUGIN_VERSION).not.toBe("0.1.0");
     expect(PLUGIN_VERSION).not.toBe("unknown");
+  });
+});
+
+describe("PLUGIN_VERSION resolution from a compiled build", () => {
+  it("resolves correctly from dist/src/version.js, not just src/version.ts", async () => {
+    // The manifest lookup walks up from the *compiled* file's own
+    // directory, which sits one level deeper (dist/src/) than the source
+    // file (src/) does relative to the repo root. A fix that only works
+    // when imported from src/ would still report "unknown" in production,
+    // since that's the file the gateway actually loads.
+    const distVersionPath = resolve(repoRoot, "dist/src/version.js");
+    const distModule = (await import(pathToFileURL(distVersionPath).href)) as {
+      PLUGIN_VERSION: string;
+    };
+    const manifest = readJson(resolve(repoRoot, "openclaw.plugin.json"));
+    expect(distModule.PLUGIN_VERSION).toBe(manifest.version);
+    expect(distModule.PLUGIN_VERSION).not.toBe("unknown");
   });
 });
 

@@ -83,6 +83,7 @@ import {
   TOKEN_TYPE_OUTPUT,
   TOKEN_TYPE_CACHE_READ,
   TOKEN_TYPE_CACHE_CREATION,
+  OC_PROVIDER,
   CODE_FUNCTION_NAME,
   CODE_FILE_PATH,
   ERROR_TYPE,
@@ -1108,6 +1109,8 @@ export function registerHooks(
         if (sessionCtx) {
           sessionCtx.modelCallSpan = span;
           sessionCtx.modelCallStartTime = Date.now();
+          sessionCtx.modelCallProvider = provider;
+          sessionCtx.modelCallAgentId = agentId;
 
           if (sessionCtx.agentSpan) {
             if (provider && provider !== "unknown") {
@@ -1151,6 +1154,24 @@ export function registerHooks(
           event?.responseModel || event?.model || ctx?.model || "unknown";
         const responseId = event?.responseId;
         const finishReasons = event?.finishReasons;
+        // NOTE (0.11.0-dev): `event.usage` here is always `{}` in practice —
+        // confirmed both by capturing the real event shape live on 2026-10-07
+        // (event_keys had no `usage`-bearing field at all: runId, callId,
+        // sessionKey, sessionId, provider, model, api, transport,
+        // contextTokenBudget, contextWindowSource, durationMs, outcome,
+        // requestPayloadBytes, responseStreamBytes, timeToFirstByteMs) and by
+        // OpenClaw's own hook-reference docs, which describe this hook pair
+        // as "sanitized provider/model call metadata: timing, outcome,
+        // bounded request-id hashes — no prompt or response content" (i.e.
+        // deliberately excludes usage, not a bug — still true as of
+        // v2026.9.8, this is specific to this hook). The extraction below
+        // is dead code kept only so the span attributes below populate
+        // correctly if a future OpenClaw version ever adds it. Real
+        // per-call usage DOES exist elsewhere, though — the sibling
+        // model.call.completed/model.call.error *diagnostic events* (not
+        // this hook) carry it since v2026.9.8; see diagnostics.ts, which
+        // is where openclaw.llm.tokens.* now comes from (0.12.0+).
+        // openclaw/openclaw#166623 was closed upstream on that basis.
         const usage = event?.usage || {};
         const inputTokens =
           usage.input ?? usage.inputTokens ?? usage.input_tokens ?? 0;
@@ -1222,9 +1243,58 @@ export function registerHooks(
           span.setStatus({ code: SpanStatusCode.OK });
         }
 
+        const provider = sessionCtx?.modelCallProvider;
+        const callAgentId = sessionCtx?.modelCallAgentId;
+
         span.end();
         sessionCtx!.modelCallSpan = undefined;
         sessionCtx!.modelCallStartTime = undefined;
+        sessionCtx!.modelCallProvider = undefined;
+        sessionCtx!.modelCallAgentId = undefined;
+
+        // Per-call request/duration metrics (0.11.0+), in their own
+        // try/catch so a problem here can never prevent the span above from
+        // closing. Fires once per real model API call, independent of
+        // `traces`/`metrics` config — the OTel no-op meter absorbs calls
+        // when metrics are disabled. Token metrics are NOT recorded here —
+        // this hook's own payload genuinely carries no usage (see the NOTE
+        // above). Real per-call token metrics instead come from the
+        // sibling model.call.completed/model.call.error *diagnostic
+        // events* (a different mechanism — see diagnostics.ts), which do
+        // carry usage since OpenClaw v2026.9.8 (openclaw/openclaw#166623).
+        // Request count and duration don't need usage data at all, so this
+        // hook firing once per real call (rather than once per agent
+        // turn, and immune to the model.usage double-dispatch bug,
+        // openclaw/openclaw#166289) is a genuine accuracy improvement for
+        // these two metrics specifically.
+        try {
+          const tel = getTelemetry();
+          if (tel) {
+            const { counters, histograms } = tel;
+            const metricAttrs: Record<string, string> = {
+              [GEN_AI_RESPONSE_MODEL]: responseModel,
+              [GEN_AI_OPERATION_NAME]: OP_CHAT,
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+            };
+            if (provider && provider !== "unknown") {
+              metricAttrs[GEN_AI_PROVIDER_NAME] = provider;
+              metricAttrs[OC_PROVIDER] = provider;
+            }
+            if (callAgentId && callAgentId !== "unknown") {
+              metricAttrs[GEN_AI_AGENT_ID] = callAgentId;
+            }
+
+            counters.llmRequests.add(1, metricAttrs);
+            if (errorMsg) {
+              counters.llmErrors.add(1, metricAttrs);
+            }
+            if (typeof durationMs === "number") {
+              histograms.llmDuration.record(durationMs, metricAttrs);
+              histograms.genAiOperationDuration.record(durationMs / 1000, metricAttrs);
+            }
+          }
+        } catch {
+        }
       } catch {
       }
 
@@ -1984,6 +2054,7 @@ export function registerHooks(
 
         // Try to get usage from diagnostic events (includes cost!)
         const diagUsage = getPendingUsage(sessionKey);
+        const diagProvider = diagUsage?.provider;
 
         // Fallback: Extract token usage from the messages array
         const messages: any[] = event?.messages || [];
@@ -2026,7 +2097,6 @@ export function registerHooks(
           }
         }
 
-        const totalTokens = totalInputTokens + totalOutputTokens + cacheReadTokens + cacheWriteTokens;
         logger.debug?.(`[otel] agent_end tokens: input=${totalInputTokens}, output=${totalOutputTokens}, cache_read=${cacheReadTokens}, cache_write=${cacheWriteTokens}, model=${model}`);
 
         const sessionCtx = store.getActiveContext(sessionKey);
@@ -2174,42 +2244,16 @@ export function registerHooks(
             agentSpan.setAttribute("openclaw.context.used", diagUsage.context.used);
           }
 
-          // Record metrics only if we didn't get them from diagnostics
-          // (diagnostics module already records metrics on model.usage event)
-          if (!diagUsage && (totalInputTokens > 0 || totalOutputTokens > 0)) {
-            const metricAttrs = {
-              [GEN_AI_RESPONSE_MODEL]: model,
-              [GEN_AI_OPERATION_NAME]: OP_INVOKE_AGENT,
-              [GEN_AI_AGENT_ID]: agentId,
-              "openclaw.agent.id": agentId,
-            };
-            counters.tokensPrompt.add(totalInputTokens + cacheReadTokens + cacheWriteTokens, metricAttrs);
-            counters.tokensCompletion.add(totalOutputTokens, metricAttrs);
-            counters.tokensTotal.add(totalTokens, metricAttrs);
-            counters.llmRequests.add(1, metricAttrs);
-
-            // Stable GenAI token usage histogram (per gen_ai.token.type)
-            histograms.genAiTokenUsage.record(totalInputTokens, {
-              ...metricAttrs,
-              [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
-            });
-            histograms.genAiTokenUsage.record(totalOutputTokens, {
-              ...metricAttrs,
-              [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
-            });
-            if (cacheReadTokens > 0) {
-              histograms.genAiTokenUsage.record(cacheReadTokens, {
-                ...metricAttrs,
-                [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
-              });
-            }
-            if (cacheWriteTokens > 0) {
-              histograms.genAiTokenUsage.record(cacheWriteTokens, {
-                ...metricAttrs,
-                [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
-              });
-            }
-          }
+          // 0.12.0+: the token-count metric fallback that used to live
+          // here (for turns where `model.usage` never fired) was removed
+          // — openclaw.llm.tokens.* now comes unconditionally from
+          // diagnostics.ts's model.call.completed/model.call.error
+          // handling, which fires per real call independent of whether
+          // this turn-level model.usage event ever arrives. The span
+          // attributes above (gen_ai.usage.input_tokens etc. on
+          // agentSpan) still use totalInputTokens/totalOutputTokens/
+          // cacheReadTokens/cacheWriteTokens computed earlier in this
+          // function — those are unaffected by this removal.
 
           // Record duration histograms — legacy (ms) and stable GenAI (s).
           if (typeof durationMs === "number") {
@@ -2741,16 +2785,15 @@ export function registerHooks(
             [GEN_AI_RESPONSE_MODEL]: model,
           });
 
-          // ISI-1019: Record token usage metrics for subagent
-          if (totalTokens > 0) {
-            const metricAttrs = {
-              [OC_SUBAGENT_CHILD_AGENT_NAME]: childAgentName,
-              [GEN_AI_RESPONSE_MODEL]: model,
-            };
-            counters.tokensPrompt.add(inputTokens, metricAttrs);
-            counters.tokensCompletion.add(outputTokens, metricAttrs);
-            counters.tokensTotal.add(totalTokens, metricAttrs);
-          }
+          // No token-metric recording here (deliberately removed): this
+          // child session's real calls are already counted once, per real
+          // model API call, via the model.call.completed/.error path —
+          // recording them again here under a different, incompatible
+          // label schema (no gen_ai.conversation.id, no provider) would
+          // double-count them under two disjoint schemas whenever core
+          // populates event.usage on subagent_ended. The span attributes
+          // above (gen_ai.usage.input_tokens etc.) still carry this
+          // subagent's usage for trace-level inspection.
 
           span.end();
           parentSessionCtx?.activeToolSpans?.delete(subagentKey);
@@ -3226,6 +3269,14 @@ export function registerHooks(
       }
     }
   }, 60_000);
+  // Same reasoning as telemetry.ts's metric heartbeat: in a "full"
+  // one-shot embedded runner context with no stop() ever called, an
+  // unref()'d timer still fires on schedule but doesn't by itself keep
+  // the process alive once there's nothing else to wait on — the same
+  // class of bug as the old completion-hang issue this guards against.
+  if (typeof (cleanupInterval as { unref?: () => void }).unref === "function") {
+    (cleanupInterval as { unref: () => void }).unref();
+  }
 
   return () => {
     clearInterval(cleanupInterval);

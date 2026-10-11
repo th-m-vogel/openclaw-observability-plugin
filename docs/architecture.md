@@ -226,6 +226,17 @@ Gateway Agent Loop              Custom Plugin
      │                               │      with prompt.chars +
      │                               │      session.message_count
      │                               │
+     │  on("model_call_started")     │
+     │ ─────────────────────────────>│  ──> create CHAT span (per real call)
+     │  (once per real LLM call)     │      (child of agent turn)
+     │                               │
+     │  on("model_call_ended")       │
+     │ ─────────────────────────────>│  ──> close CHAT span (no usage here —
+     │                               │      this event carries none, see
+     │                               │      Data Flow Comparison below)
+     │                               │      update llm.requests/.duration
+     │                               │      (per-call metrics, 0.11.0+)
+     │                               │
      │  on("tool_result_persist")    │
      │ ─────────────────────────────>│  ──> create TOOL span
      │  (called for each tool)       │      (child of agent turn)
@@ -233,7 +244,10 @@ Gateway Agent Loop              Custom Plugin
      │  on("agent_end")              │
      │ ─────────────────────────────>│  ──> end agent turn span
      │                               │      end root span
-     │                               │      extract tokens from messages
+     │                               │      extract tokens from messages,
+     │                               │      enrich turn span + token-count
+     │                               │      fallback metrics if model.usage
+     │                               │      never fired this turn
 ```
 
 ### Trace Context Propagation
@@ -316,17 +330,20 @@ openclaw.request (root)
 
 ### OTel Signals Created
 
-**Metrics (emitted by this plugin):**
+**Metrics (emitted by this plugin, see `docs/telemetry/metrics.md` for the full reference):**
 ```
-openclaw.llm.tokens.total        # counter, by gen_ai.response.model
-openclaw.llm.tokens.prompt       # counter
-openclaw.llm.tokens.completion   # counter
-openclaw.llm.cost.usd            # counter, by gen_ai.response.model
+openclaw.llm.requests            # counter, per real call (0.11.0+)
+openclaw.llm.errors              # counter, per real call (0.11.0+)
+openclaw.llm.duration            # histogram, per real call (0.11.0+)
+openclaw.llm.tokens.total        # counter, per agent turn, by gen_ai.response.model
+openclaw.llm.tokens.prompt       # counter, per agent turn
+openclaw.llm.tokens.completion   # counter, per agent turn
+openclaw.llm.cost.usd            # counter, per agent turn, by gen_ai.response.model
 openclaw.tool.calls              # counter
 openclaw.session.resets          # counter
 ```
 
-The OTel-stable `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` are recorded as **span attributes** on the LLM/agent-turn spans (see the trace structure above) — not as separate metric instruments.
+The OTel-stable `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` are recorded as **span attributes** on both the per-call `chat {model}` span and the aggregated `openclaw.agent.turn` span (see the trace structure above), in addition to the per-call counters above.
 
 **Traces (emitted by this plugin):** see the trace tree above (`openclaw.request` → `openclaw.session` → `openclaw.agent.turn` → child spans).
 
@@ -354,19 +371,42 @@ The OTel-stable `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` are r
 
 ### Custom Plugin: Token Tracking
 
+**0.11.0+** — two separate paths, split by what's exclusively available on each. Tokens/cost stayed on the turn-level path; only request count and duration moved to the per-call one (see `docs/telemetry/metrics.md` for why the obvious-looking alternative — moving tokens there too — doesn't work: `model_call_ended`'s real event carries no usage data at all).
+
 ```
+Per real model call (openclaw.llm.requests / .duration / .errors only):
 1. Agent calls LLM via pi-ai
-2. pi-ai returns response with .usage
-3. Gateway fires agent_end hook with:
-   - messages: [...including assistant messages with .usage]
-4. Custom plugin:
-   - Parses messages for usage data
-   - Checks for pending diagnostic data (if available)
-   - Adds attributes to existing agent turn span
-   - Updates counters
-5. Ends spans (agent turn, then root)
+2. Gateway fires model_call_started → plugin opens a "chat {model}" span,
+   stashes provider/agentId on the session's active context
+3. pi-ai returns response with .usage (but this is NOT what model_call_ended
+   receives — see step 4)
+4. Gateway fires model_call_ended with sanitized call metadata only: timing,
+   outcome, provider/model, bounded request-id hashes — no usage field
+5. Plugin closes the span (no usage attributes to add — none are available)
+   and records request-count/duration metrics (0.11.0+, new — previously
+   this step only touched the span, and didn't record metrics at all)
 6. Batches and exports via OTLP
+
+Per agent turn (openclaw.llm.tokens.* and .cost.usd — unchanged since before
+0.11.0, still the only source for either):
+1. Gateway fires the "model.usage" diagnostic event once per turn (summing
+   however many of the per-call cycles above happened in it, e.g. several in
+   a tool-use loop) — this is the one place token counts and cost appear at
+   all; neither is ever on model_call_started/model_call_ended
+2. Plugin dedup-checks it against openclaw/openclaw#166289 (core is known to
+   double-dispatch this event for a subset of calls, 0.11.0+) and records
+   tokens/cost if new
+3. Gateway also fires agent_end with the turn's messages (incl. .usage) —
+   plugin uses this to enrich the agent-turn span's attributes, and (0.11.0+,
+   same label schema as step 2 now) as a token-count fallback for turns
+   where model.usage never fired at all
 ```
+
+Before 0.11.0, step 5 of the per-call path only set span attributes and
+recorded nothing; the agent-turn fallback in step 3 used a different,
+disjoint label schema (no `gen_ai.conversation.id`) than step 2's primary
+path. Both are fixed now — see `docs/telemetry/metrics.md` for the full
+before/after.
 
 ---
 

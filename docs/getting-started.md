@@ -4,7 +4,7 @@ Get OpenTelemetry observability for your OpenClaw AI agents.
 
 ## Prerequisites
 
-- OpenClaw v2026.4.21 or later (see `minOpenClawVersion` in `openclaw.plugin.json`)
+- OpenClaw v2026.9.8 or later (see `minOpenClawVersion` in `openclaw.plugin.json` — raised from v2026.4.21 for real per-call `openclaw.llm.tokens.*`, see `docs/limitations.md`)
 - An OTLP endpoint (local collector, Dynatrace, Grafana, etc.)
 
 ## Option 1: Official Diagnostics Plugin (Recommended Start)
@@ -56,16 +56,18 @@ For connected traces and per-tool-call visibility, add the custom plugin.
 ### Step 1: Clone the Repository
 
 ```bash
-cd ~/.openclaw/extensions
+mkdir -p ~/.openclaw/plugins && cd ~/.openclaw/plugins
 git clone --branch v0.10.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git otel-observability
 ```
 
-### Step 2: Install Dependencies
+### Step 2: Install Dependencies and Build
 
 ```bash
 cd otel-observability
-npm install
+npm ci && npm run build
 ```
+
+The gateway loads the compiled `dist/index.js`, not the TypeScript source directly — `dist/` isn't checked into the repo, so this build step is required, not optional. Re-run it after every `git pull` that updates this plugin.
 
 ### Step 3: Configure OpenClaw
 
@@ -75,7 +77,7 @@ Add to your `~/.openclaw/openclaw.json`:
 {
   "plugins": {
     "load": {
-      "paths": ["~/.openclaw/extensions/otel-observability"]
+      "paths": ["~/.openclaw/plugins/otel-observability"]
     },
     "entries": {
       "otel-observability": {
@@ -152,51 +154,9 @@ openclaw.request
 
 ---
 
-## Using Both Plugins Together
+## Don't run both plugins at once
 
-For complete observability, enable both:
-
-```json
-{
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "http://localhost:4318",
-      "serviceName": "openclaw-gateway",
-      "traces": true,
-      "metrics": true,
-      "logs": true
-    }
-  },
-  "plugins": {
-    "load": {
-      "paths": ["~/.openclaw/extensions/otel-observability"]
-    },
-    "entries": {
-      "otel-observability": {
-        "enabled": true,
-        "hooks": {
-          "allowConversationAccess": true
-        },
-        "config": {
-          "endpoint": "http://localhost:4318",
-          "serviceName": "openclaw-gateway"
-        }
-      }
-    }
-  }
-}
-```
-
-> `hooks.allowConversationAccess: true` is required on OpenClaw ≥ 2026.4.23. See [the install step above](#step-3-configure-openclaw).
-
-**What you get:**
-
-| Source | Data |
-|--------|------|
-| Official | Gateway health, queue metrics, log forwarding, session states |
-| Custom | Connected request traces, tool call spans, agent turn details |
+The official `diagnostics-otel` plugin and this one both initialize the OpenTelemetry SDK and register the global tracer/meter provider — running both at the same time means whichever registers second silently loses (or both end up sharing one provider with mismatched resource/endpoint config), not clean combined coverage. Pick one: the official plugin covers gateway-level health (queues, webhooks, log forwarding); this plugin covers connected per-request tracing, per-tool-call spans, and token/cost metrics. See [Limitations](./limitations.md) for the full reasoning.
 
 ---
 
