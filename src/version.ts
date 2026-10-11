@@ -18,19 +18,30 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// This module lives at a different depth relative to the repo root
+// depending on whether it's running from source (`src/version.ts`, one
+// level down) or from a compiled build (`dist/src/version.js`, two levels
+// down) — a single fixed `".."` only resolves correctly for the former and
+// silently falls back to "unknown" for the latter, which is what the
+// production gateway actually loads. Try each plausible depth instead of
+// assuming one.
+const MANIFEST_SEARCH_DEPTHS = ["..", "../..", "../../.."];
+
 function readPluginVersion(): string {
-  try {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const manifestPath = resolve(here, "..", "openclaw.plugin.json");
-    const raw = readFileSync(manifestPath, "utf8");
-    const parsed = JSON.parse(raw) as { version?: unknown };
-    if (typeof parsed.version === "string" && parsed.version.length > 0) {
-      return parsed.version;
+  const here = dirname(fileURLToPath(import.meta.url));
+  for (const depth of MANIFEST_SEARCH_DEPTHS) {
+    try {
+      const manifestPath = resolve(here, depth, "openclaw.plugin.json");
+      const raw = readFileSync(manifestPath, "utf8");
+      const parsed = JSON.parse(raw) as { version?: unknown };
+      if (typeof parsed.version === "string" && parsed.version.length > 0) {
+        return parsed.version;
+      }
+    } catch {
+      // Try the next candidate depth.
     }
-    return "unknown";
-  } catch {
-    return "unknown";
   }
+  return "unknown";
 }
 
 /**
