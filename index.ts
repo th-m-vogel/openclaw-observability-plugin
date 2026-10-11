@@ -178,7 +178,6 @@ const otelObservabilityPlugin = {
     const logger = api.logger;
     const config = parseConfig(api.pluginConfig, logger);
 
-    teardownActiveRegistration(logger);
     const thisRegistration: NonNullable<typeof activeRegistration> = {
       stopHooks: null,
       unsubscribeDiagnostics: null,
@@ -186,7 +185,6 @@ const otelObservabilityPlugin = {
       logPipeline: null,
       rejectionHandlerCleanup: null,
     };
-    activeRegistration = thisRegistration;
 
     let telemetry: TelemetryRuntime | null = null;
     let logPipeline: LogPipelineRuntime | null = null;
@@ -200,8 +198,29 @@ const otelObservabilityPlugin = {
       telemetry = null;
       logger.info("[otel] Telemetry shut down on gateway_stop");
     };
-    gatewayStopFinalizer = shutdownTelemetry;
-    gatewayStopFinalizationStarted = false;
+
+    // ISI-1900: skip long-lived initialization unless this is a real, live
+    // "full" registration (see isNonFullRegistration() below). Computed
+    // before touching any of the active-registration bookkeeping below —
+    // a non-full registration reaching the SAME module instance as a live
+    // "full" one must leave that live registration's hooks, diagnostics
+    // subscription, and gateway_stop finalizer completely alone. Doing the
+    // teardown-previous-registration dance unconditionally here (as this
+    // used to) would silently tear down the live registration's telemetry
+    // out from under it, with nothing to re-create it since init is
+    // skipped for a non-full call — latent until the next restart.
+    const skipLongLivedInit = isNonFullRegistration(api);
+
+    if (!skipLongLivedInit) {
+      teardownActiveRegistration(logger);
+      activeRegistration = thisRegistration;
+      gatewayStopFinalizer = shutdownTelemetry;
+      gatewayStopFinalizationStarted = false;
+    } else {
+      logger.info(
+        `[otel] Non-full registration (${String(api.registrationMode)}) detected — skipping telemetry init`,
+      );
+    }
 
     // ── Telemetry + hooks (init at register() time) ─────────────────
     // Telemetry, the log pipeline, and hooks ALL run during register()
@@ -216,15 +235,8 @@ const otelObservabilityPlugin = {
     //     a no-op.
     // registerHooks returns a cleanup fn (clears the stale-session
     // sweeper interval) so service.stop() doesn't leak the timer.
-
-    // ISI-1900: skip long-lived initialization unless this is a real, live
-    // "full" registration (see isNonFullRegistration() above).
-    const skipLongLivedInit = isNonFullRegistration(api);
-    if (skipLongLivedInit) {
-      logger.info(
-        `[otel] Non-full registration (${String(api.registrationMode)}) detected — skipping telemetry init`,
-      );
-    }
+    // (skipLongLivedInit itself is computed above, before the
+    // active-registration bookkeeping — see the comment there.)
 
     // ISI-9700: OpenClaw 9.7 regression — some async path produces an
     // unhandled rejection with reason=undefined.  OpenClaw's own handler
@@ -376,6 +388,18 @@ const otelObservabilityPlugin = {
     // prevents CLI exit.
     if (telemetry && !skipLongLivedInit) {
       registerDiagnosticsListener(telemetry, logger).then((unsub) => {
+        // This resolves asynchronously (loadSdk()/loadInternalDiagnostics()
+        // await internally). If stop() or a fresh register() already ran
+        // by the time it settles, `activeRegistration` no longer points at
+        // `thisRegistration` — stashing `unsub` as live here would leak a
+        // still-attached listener nothing else knows to ever call (the
+        // same stacked-listener shape as the #166289/duplicate-register
+        // bug this file otherwise guards against). Unsubscribe it
+        // immediately instead of keeping it.
+        if (activeRegistration !== thisRegistration) {
+          unsub();
+          return;
+        }
         unsubscribeDiagnostics = unsub;
         thisRegistration.unsubscribeDiagnostics = unsub;
         if (hasDiagnosticsSupport()) {
