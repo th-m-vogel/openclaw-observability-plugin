@@ -4,6 +4,10 @@ All notable changes to the `@th-m-vogel/openclaw-otel-observability` plugin are 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Nothing yet — `0.12.0-dev`.
+
 ## [0.11.0](https://github.com/th-m-vogel/openclaw-observability-plugin/compare/v0.10.0...v0.11.0) (2026-10-11)
 
 Real per-call token metrics, the `#166289` duplicate-dispatch root cause found and fixed, and a round of correctness fixes from a full code/documentation review. Requires OpenClaw `2026.9.8` or newer (this release's new minimum — see `openclaw.plugin.json`); the plugin logs a one-time warning instead of failing to load on older installs.
