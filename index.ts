@@ -387,7 +387,7 @@ const otelObservabilityPlugin = {
     // ISI-1710: skip in plugin-mgmt contexts to avoid async work that
     // prevents CLI exit.
     if (telemetry && !skipLongLivedInit) {
-      registerDiagnosticsListener(telemetry, logger).then((unsub) => {
+      registerDiagnosticsListener(telemetry, config, logger).then((unsub) => {
         // This resolves asynchronously (loadSdk()/loadInternalDiagnostics()
         // await internally). If stop() or a fresh register() already ran
         // by the time it settles, `activeRegistration` no longer points at

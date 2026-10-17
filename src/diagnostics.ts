@@ -12,6 +12,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { TelemetryRuntime } from "./telemetry.js";
+import type { OtelObservabilityConfig } from "./config.js";
+import { resolveMetricConversationId } from "./metric-session-key.js";
 import {
   GEN_AI_AGENT_ID,
   GEN_AI_CONVERSATION_ID,
@@ -297,6 +299,7 @@ export const activeAgentSpans = new Map<string, Span>();
  */
 export async function registerDiagnosticsListener(
   telemetry: TelemetryRuntime,
+  config: OtelObservabilityConfig,
   logger: any
 ): Promise<() => void> {
   // Load the SDK if not already loaded
@@ -484,7 +487,7 @@ export async function registerDiagnosticsListener(
       const metricAttrs: Record<string, string> = {
         [GEN_AI_RESPONSE_MODEL]: model,
         [GEN_AI_OPERATION_NAME]: OP_CHAT,
-        [GEN_AI_CONVERSATION_ID]: sessionKey,
+        [GEN_AI_CONVERSATION_ID]: resolveMetricConversationId(sessionKey, config),
       };
       if (evt.provider && evt.provider !== "unknown") {
         metricAttrs[GEN_AI_PROVIDER_NAME] = evt.provider;
@@ -556,7 +559,7 @@ export async function registerDiagnosticsListener(
       [GEN_AI_RESPONSE_MODEL]: model,
       [GEN_AI_PROVIDER_NAME]: provider,
       [GEN_AI_OPERATION_NAME]: OP_INVOKE_AGENT,
-      [GEN_AI_CONVERSATION_ID]: sessionKey,
+      [GEN_AI_CONVERSATION_ID]: resolveMetricConversationId(sessionKey, config),
       [OC_PROVIDER]: provider,
     };
 

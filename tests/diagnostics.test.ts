@@ -83,10 +83,11 @@ async function registerWithEntry(
   entryFile: string,
   logger = createLogger(),
   telemetry = createTelemetry(),
+  config: unknown = { collapseEphemeralSessions: false },
 ) {
   const diagnostics = await loadFreshDiagnostics();
   const unsubscribe = await withArgvEntry(entryFile, () =>
-    diagnostics.registerDiagnosticsListener(telemetry as any, logger),
+    diagnostics.registerDiagnosticsListener(telemetry as any, config as any, logger),
   );
   return { diagnostics, logger, unsubscribe };
 }
@@ -465,6 +466,136 @@ describe("model.call.completed / model.call.error diagnostic events", () => {
     expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
     expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();
     expect(telemetry.counters.tokensTotal.add).not.toHaveBeenCalled();
+  });
+});
+
+describe("collapseEphemeralSessions (metric labels only)", () => {
+  const cronSessionKey =
+    "agent:main:cron:job1:run:28c489cb-aaaa-bbbb-cccc-dddddddddddd";
+  const collapsedCronKey = "agent:main:cron:job1";
+  const effectsSessionKey =
+    "agent:main:internal-session-effects:skill-workshop-review_a737fdf6-1111-2222-3333-444444444444";
+  const collapsedEffectsKey = "agent:main:internal-session-effects:skill-workshop-review";
+
+  it("model.call.completed: labels openclaw.llm.tokens.prompt with the collapsed session key when enabled", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.call.completed",
+          sessionKey: "${cronSessionKey}",
+          provider: "anthropic",
+          model: "claude-3.5-sonnet",
+          usage: { input: 100, output: 20, total: 120 },
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(
+      path.join(root, "openclaw.mjs"),
+      createLogger(),
+      telemetry,
+      { collapseEphemeralSessions: true },
+    );
+
+    expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(
+      100,
+      expect.objectContaining({ "gen_ai.conversation.id": collapsedCronKey }),
+    );
+  });
+
+  it("model.call.completed: leaves the session key uncollapsed by default", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.call.completed",
+          sessionKey: "${cronSessionKey}",
+          provider: "anthropic",
+          model: "claude-3.5-sonnet",
+          usage: { input: 100, output: 20, total: 120 },
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.tokensPrompt.add).toHaveBeenCalledWith(
+      100,
+      expect.objectContaining({ "gen_ai.conversation.id": cronSessionKey }),
+    );
+  });
+
+  it("model.usage: labels openclaw.llm.cost.usd with the collapsed session key when enabled", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.usage",
+          sessionKey: "${effectsSessionKey}",
+          provider: "anthropic",
+          model: "claude-3.5-sonnet",
+          usage: { total: 500 },
+          costUsd: 0.05,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(
+      path.join(root, "openclaw.mjs"),
+      createLogger(),
+      telemetry,
+      { collapseEphemeralSessions: true },
+    );
+
+    const costCounter = telemetry.meter.createCounter.mock.results[0]?.value;
+    expect(costCounter.add).toHaveBeenCalledWith(
+      0.05,
+      expect.objectContaining({ "gen_ai.conversation.id": collapsedEffectsKey }),
+    );
+  });
+
+  it("model.usage: the dedup guard still keys on the RAW (uncollapsed) session key", async () => {
+    const root = makeInstallRoot();
+    const runA = "agent:main:cron:job1:run:11111111-1111-1111-1111-111111111111";
+    const runB = "agent:main:cron:job1:run:22222222-2222-2222-2222-222222222222";
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.usage", sessionKey: "${runA}", provider: "anthropic",
+          model: "claude-3.5-sonnet", usage: { total: 1000 }, costUsd: 0.05,
+        });
+        listener({
+          type: "model.usage", sessionKey: "${runB}", provider: "anthropic",
+          model: "claude-3.5-sonnet", usage: { total: 1000 }, costUsd: 0.05,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(
+      path.join(root, "openclaw.mjs"),
+      createLogger(),
+      telemetry,
+      { collapseEphemeralSessions: true },
+    );
+
+    // Two genuinely distinct runs with identical cost/tokens must both be
+    // recorded — the dedup guard must key on the raw sessionKey, not the
+    // collapsed one, or these would wrongly look like the same duplicate
+    // dispatch.
+    expect(telemetry.meter.createCounter).toHaveBeenCalledTimes(2);
   });
 });
 
