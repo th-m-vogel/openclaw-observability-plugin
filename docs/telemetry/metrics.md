@@ -10,7 +10,7 @@ All metrics use the `openclaw.*` namespace and are exported via OTLP at the conf
 
 #### `collapseEphemeralSessions` (metrics only)
 
-With `collapseEphemeralSessions: true` (see [Configuration](../configuration.md)), the `gen_ai.conversation.id` label on `openclaw.llm.requests`, `.errors`, `.duration`, `.tokens.*`, and `.cost.usd` — plus `openclaw.tool.calls`, `.tool_call_duration`, and `.approvals` — may be a collapsed, stable job-level value instead of the full per-run session key, for session keys matching one of the two recognized ephemeral shapes (see Configuration). Trace spans and log lines are unaffected and always carry the full per-run session key for drill-down. Default `false`: this label is the raw session key everywhere, same as before this option existed.
+With `collapseEphemeralSessions: true` (see [Configuration](../configuration.md)), the `gen_ai.conversation.id` label on `openclaw.llm.requests`, `.errors`, `.duration`, `.tokens.*`, and `.cost.usd`, on `gen_ai.client.token.usage` and `gen_ai.client.operation.duration`, and on `openclaw.tool.calls`, `openclaw.tool.duration`, and `openclaw.tool.approvals` — may be a collapsed, stable job-level value instead of the full per-run session key, for session keys matching one of the two recognized ephemeral shapes (see Configuration). Trace spans and log lines are unaffected and always carry the full per-run session key for drill-down. Default `false`: this label is the raw session key everywhere, same as before this option existed.
 
 ### `openclaw.llm.requests`
 

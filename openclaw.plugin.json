@@ -70,6 +70,11 @@
       "label": "Per-Signal OTLP Headers",
       "help": "Optional per-signal header overrides (e.g. a different APIKEY per signal's pipeline). Replaces `headers` entirely for that signal when set.",
       "advanced": true
+    },
+    "collapseEphemeralSessions": {
+      "label": "Collapse Ephemeral Session IDs (Metrics Only)",
+      "help": "Collapse ephemeral per-run session keys (recurring cron jobs, internal-session-effect turns) to a stable job-level identifier on metric labels only. Traces and logs always keep the full per-run session key. Default off.",
+      "advanced": true
     }
   },
   "configSchema": {
@@ -187,6 +192,10 @@
           "traces": { "type": "object", "additionalProperties": { "type": "string" } }
         },
         "description": "Optional per-signal header overrides. Replaces `headers` entirely for that signal when set."
+      },
+      "collapseEphemeralSessions": {
+        "type": "boolean",
+        "description": "Collapse ephemeral per-run session-key shapes (recurring cron jobs, internal-session-effect turns) to a stable, job-level identifier on metric labels only. Traces and logs always keep the full per-run session key."
       }
     }
   }

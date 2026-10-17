@@ -425,3 +425,21 @@ describe("parseConfig — collapseEphemeralSessions", () => {
     expect(parseConfig({ collapseEphemeralSessions: "yes" as any }).collapseEphemeralSessions).toBe(false);
   });
 });
+
+describe("openclaw.plugin.json manifest parity", () => {
+  it("every OtelObservabilityConfig key accepted by parseConfig is declared in configSchema.properties", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const manifestPath = path.join(__dirname, "..", "openclaw.plugin.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+    const schemaKeys = new Set(Object.keys(manifest.configSchema.properties));
+
+    const fullConfig = parseConfig({
+      signalEndpoints: { metrics: "https://example.com" },
+      signalHeaders: { metrics: {} },
+    });
+    for (const key of Object.keys(fullConfig)) {
+      expect(schemaKeys.has(key), `configSchema.properties is missing "${key}" — the manifest's additionalProperties: false will reject this option at runtime`).toBe(true);
+    }
+  });
+});
