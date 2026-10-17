@@ -411,3 +411,17 @@ describe("resolveSignalConfig", () => {
     );
   });
 });
+
+describe("parseConfig — collapseEphemeralSessions", () => {
+  it("defaults to false when unset", () => {
+    expect(parseConfig({}).collapseEphemeralSessions).toBe(false);
+  });
+
+  it("accepts an explicit true", () => {
+    expect(parseConfig({ collapseEphemeralSessions: true }).collapseEphemeralSessions).toBe(true);
+  });
+
+  it("coerces a non-boolean value to the default (false)", () => {
+    expect(parseConfig({ collapseEphemeralSessions: "yes" as any }).collapseEphemeralSessions).toBe(false);
+  });
+});
