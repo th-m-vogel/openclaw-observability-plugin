@@ -167,12 +167,19 @@ Adding `cache_read.input_tokens` + `cache_creation.input_tokens` + `input_tokens
 
 ## Monitoring Token Usage
 
-> **Note:** `openclaw_llm_tokens_total` (and `_prompt`/`_completion`) below accumulate per **agent turn**, not per real model API call — a turn with several tool-use round-trips (like the `cache_read`/`cache_write` example above) contributes one combined increment covering every call in it, not one per call. This is a real limitation of OpenClaw's current plugin API, not something this plugin can improve on (see `docs/limitations.md`) — `openclaw_llm_requests`/`_duration` *are* per-call as of 0.11.0+, but tokens/cost have no per-call source to draw from.
+> **Note:** As of **0.11.0+**, `openclaw_llm_tokens_total` (and `_prompt`/`_completion`) accumulate per **real model API call**, not per agent turn — a turn with several tool-use round-trips (like the `cache_read`/`cache_write` example above) now produces one increment per call, via the `model.call.completed`/`model.call.error` diagnostic events (requires OpenClaw v2026.9.8+). Before 0.11.0 these were turn-aggregated like `openclaw_llm_cost_usd` still is today. **Cost remains turn-level only** — there's no per-call cost source anywhere in OpenClaw's plugin API; see `docs/limitations.md` for why.
+>
+> One consequence of per-call instrumentation: a conversation carries a unique `gen_ai.conversation.id` label, so a conversation whose calls all land in the same ~30s metrics-export window (a one-shot cron/background session, or just a fast multi-call burst) produces a single sample with nothing earlier to diff against — `rate()`/`increase()` queries show `0` for it even though the value is really there (an instant query finds it fine). See `docs/limitations.md` for the full mechanism and a query workaround before assuming a panel showing zero means no data arrived.
 
 ### Key Metrics to Watch
 
 ```promql
-# Total token cost over time
+# Total tokens right now, by model (instant value, not a rate — avoids the
+# one-shot-series blind spot above; see docs/limitations.md)
+sum(openclaw_llm_tokens_total) by (gen_ai_response_model)
+
+# Token growth rate for long-running/multi-call sessions (accurate once a
+# conversation's calls span more than one export tick)
 sum(rate(openclaw_llm_tokens_total[5m])) by (gen_ai_response_model)
 
 # Cache hit ratio (from the gen_ai.client.token.usage histogram)

@@ -63,6 +63,8 @@ This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plu
 
 ## Quick start
 
+**Prerequisites:** an OTLP-compatible endpoint to send telemetry to (self-hosted collector, or a managed backend — Dynatrace, Grafana Cloud, IONOS Cloud Observability, etc.), and whatever credential that endpoint requires (API key, bearer token, or none for a local collector with no auth). See [Backends](./docs/backends/index.md) for setup notes on specific providers.
+
 1. Clone, pinned to a release tag, into your OpenClaw install's `plugins/` directory, and build:
    ```bash
    git clone --branch v0.11.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git ~/.openclaw/plugins/otel-observability
@@ -70,7 +72,7 @@ This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plu
    npm ci && npm run build
    ```
 
-2. Point `openclaw.json` at the clone and enable it:
+2. Point `openclaw.json` at the clone and enable it. This example enables metrics only (traces and logs off) against one shared OTLP endpoint and header — a reasonable minimal starting point, since metrics alone already cover token/cost/latency dashboards without the extra volume of full tracing. Flip `traces`/`logs` to `true` once you want the full picture, and see [Configuration](./docs/configuration.md#per-signal-endpoints-multi-backend-fan-out) if you need to route signals to different URLs/credentials instead:
    ```json
    {
      "plugins": {
@@ -79,13 +81,23 @@ This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plu
          "otel-observability": {
            "enabled": true,
            "hooks": { "allowConversationAccess": true },
-           "config": { "endpoint": "http://localhost:4318" }
+           "config": {
+             "endpoint": "https://otlp-collector.example.com",
+             "headers": { "Authorization": "Bearer ${OTEL_API_KEY}" },
+             "serviceName": "openclaw-gateway",
+             "traces": false,
+             "metrics": true,
+             "logs": false,
+             "captureContent": false
+           }
          }
        }
      }
    }
    ```
-   `hooks.allowConversationAccess: true` is required on OpenClaw ≥ 2026.4.23 — without it, the conversation-tracing hooks are silently blocked and no `openclaw.agent.turn` spans ever reach your backend.
+   `endpoint` is the OTLP base URL only, for the default HTTP protocol shown here — the plugin appends the per-signal path (`/v1/traces`, `/v1/metrics`, `/v1/logs`) itself; don't include it yourself. (gRPC and any `signalEndpoints` override are used verbatim with no suffix appended — see [Configuration](./docs/configuration.md#endpoint-configuration).) The exact header name/scheme your backend expects varies (`Authorization: Bearer ...`, a plain API-key header, etc.) — check [Backends](./docs/backends/index.md) for your specific provider.
+
+   `hooks.allowConversationAccess: true` is required on OpenClaw ≥ 2026.4.23, for every install, and defaults to **unset/false**. It grants this plugin's non-bundled hooks permission to receive conversation-scoped typed-hook events at all (`before_model_resolve`, `llm_input`/`llm_output`, `agent_end`, and the rest) — without it, those registrations are silently dropped and no `openclaw.agent.turn`/model-call spans or per-call metrics ever reach your backend, with no error logged. This is **not** the same thing as exposing conversation content: `allowConversationAccess` only lets the plugin see that these events fired and their structural metadata (model, token counts, timing). Actual prompt/completion text is a separate, privacy-sensitive opt-in — the `captureContent` option (default `false`) — and stays off unless you explicitly turn it on. See [captureContent](./docs/configuration.md#capturecontent-gateway-launch-setting) before enabling it: once on, conversation content is exported to whatever backend/logging system this config points at.
 
 3. Clear the jiti cache and restart:
    ```bash
@@ -99,11 +111,13 @@ This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plu
    ```
    Send a message, then check your backend for an `openclaw.request` span with at least one `openclaw.agent.turn` child.
 
-Full walkthrough, every config option, and backend-specific examples (Dynatrace, Grafana Cloud, generic OTLP collector): [Getting Started](./docs/getting-started.md), [Configuration](./docs/configuration.md), [Backends](./docs/backends/).
+Full walkthrough, every config option, and backend-specific examples (Dynatrace, Grafana Cloud, generic OTLP collector): [Getting Started](./docs/getting-started.md), [Configuration](./docs/configuration.md), [Backends](./docs/backends/index.md).
 
 ## Known limitations
 
-The one worth knowing before you start debugging a dashboard: **cost and token-breakdown reporting depend entirely on an OpenClaw core event (`model.usage`) that doesn't fire for every session type** — confirmed gaps include per-channel/topic model overrides, internal/background agent-turn sessions, and multi-call tool-use continuation steps (each tracked upstream as its own issue). Real per-call *token counts* still arrive correctly through a separate, more reliable event in all of these cases — only cost and the token-type breakdown go missing. There's no plugin-side fix for an event core never emits.
+The one worth knowing before you start debugging a dashboard: **`rate()`/`increase()` panels can show zero cost/tokens for a session even though the data arrived correctly.** `openclaw.llm.cost.usd` and the token-breakdown metrics carry a per-conversation ID label, so a conversation whose calls all land in a single sample — a one-shot isolated cron/background session, or any conversation whose calls complete within one 30s export tick — produces only one sample for that series, with nothing earlier to diff against. An instant query finds the value fine; a windowed `rate()`/`increase()`, even grouped down to just `model`, silently contributes `0` for that series. This looks identical to "no data," but it isn't — see [Limitations](./docs/limitations.md) for the mechanism and the query workaround.
+
+Separately: **cost and token-breakdown reporting depend entirely on an OpenClaw core event (`model.usage`) that doesn't fire for every session type** — confirmed gaps include per-channel/topic model overrides, internal/background agent-turn sessions, and multi-call tool-use continuation steps (each tracked upstream as its own issue). Real per-call *token counts* still arrive correctly through a separate, more reliable event in all of these cases — only cost and the token-type breakdown go missing. There's no plugin-side fix for an event core never emits.
 
 Also: custom/self-hosted OpenAI-compatible providers always report `cost: undefined` (structural — no cost field exists in that API spec, by design), and zero-code auto-instrumentation isn't possible for this ecosystem (ESM/CJS isolation breaks it) — all telemetry comes from typed hooks and diagnostic events instead.
 

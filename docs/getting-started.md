@@ -57,7 +57,7 @@ For connected traces and per-tool-call visibility, add the custom plugin.
 
 ```bash
 mkdir -p ~/.openclaw/plugins && cd ~/.openclaw/plugins
-git clone --branch v0.10.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git otel-observability
+git clone --branch v0.11.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git otel-observability
 ```
 
 ### Step 2: Install Dependencies and Build
@@ -96,7 +96,7 @@ Add to your `~/.openclaw/openclaw.json`:
 }
 ```
 
-> **Required for OpenClaw ≥ 2026.4.23.** Path-loaded (non-bundled) plugins must explicitly opt in to conversation typed hooks. Without `hooks.allowConversationAccess: true`, OpenClaw silently drops the registrations for `before_model_resolve`, `llm_input`, `llm_output`, `before_agent_finalize`, `agent_end`, `before_agent_reply`, and `before_agent_run`. The plugin still prints its `[otel] Registered ... hook (via api.on)` banners but the handlers never fire, so no `openclaw.request` / `openclaw.agent.turn` spans reach your backend. See [github issue #20](https://github.com/henrikrexed/openclaw-observability-plugin/issues/20) and the [troubleshooting section](../README.md#hooks-register-but-never-fire).
+> **Required for OpenClaw ≥ 2026.4.23.** Path-loaded (non-bundled) plugins must explicitly opt in to conversation typed hooks. Without `hooks.allowConversationAccess: true`, OpenClaw silently drops the registrations for `before_model_resolve`, `llm_input`, `llm_output`, `before_agent_finalize`, `agent_end`, `before_agent_reply`, and `before_agent_run`. The plugin still prints its `[otel] Registered ... hook (via api.on)` banners but the handlers never fire, so no `openclaw.request` / `openclaw.agent.turn` spans reach your backend. See [github issue #20](https://github.com/henrikrexed/openclaw-observability-plugin/issues/20) and the [troubleshooting section](#hooks-register-but-never-fire) below.
 
 > **Note:** Custom plugin settings live under `plugins.entries.otel-observability.config`. OpenClaw's built-in diagnostics exporter uses a separate `diagnostics.otel` block; do not mix the two config surfaces.
 
@@ -334,4 +334,4 @@ See [Architecture → Plugin Lifecycle](architecture.md#plugin-lifecycle) for wh
 - [Configuration Reference](./configuration.md) — All options
 - [Architecture](./architecture.md) — How it works
 - [Limitations](./limitations.md) — Known constraints
-- [Backend Guides](./backends/) — Specific backend setup
+- [Backend Guides](./backends/index.md) — Specific backend setup

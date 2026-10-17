@@ -252,7 +252,7 @@ Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`) — upstrea
 
   **Consumer action:** dashboards, alerts, and queries must switch to the
   stable keys before upgrading to plugin `0.5.0` / schema `1.3.0`. See
-  [ISI-994](./docs/architecture.md#deprecated-attributes--dual-emit-window-schema-12x)
+  [ISI-994](./docs/architecture.md#removed-attributes--dual-emit-window-closed-schema-130)
   for the migration history.
 
 ### Added
@@ -310,7 +310,7 @@ Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`) — upstrea
   **Planned removal:** schema `1.3.0` / plugin `0.5.0`. The deprecation
   window is one minor release; the follow-up removal task is filed as
   ISI-1004 (a child of the ISI-992 epic).
-  See [`docs/architecture.md#deprecated-attributes--dual-emit-window-schema-12x`](./docs/architecture.md#deprecated-attributes--dual-emit-window-schema-12x)
+  See [`docs/architecture.md#removed-attributes--dual-emit-window-closed-schema-130`](./docs/architecture.md#removed-attributes--dual-emit-window-closed-schema-130)
   for the full migration table and the consumer-side update checklist.
 - **Granular content capture policy (ISI-1000).** The `captureContent`
   plugin option now accepts a `ContentCapturePolicy` object with five

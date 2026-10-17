@@ -335,10 +335,10 @@ openclaw.request (root)
 openclaw.llm.requests            # counter, per real call (0.11.0+)
 openclaw.llm.errors              # counter, per real call (0.11.0+)
 openclaw.llm.duration            # histogram, per real call (0.11.0+)
-openclaw.llm.tokens.total        # counter, per agent turn, by gen_ai.response.model
-openclaw.llm.tokens.prompt       # counter, per agent turn
-openclaw.llm.tokens.completion   # counter, per agent turn
-openclaw.llm.cost.usd            # counter, per agent turn, by gen_ai.response.model
+openclaw.llm.tokens.total        # counter, per real call (0.11.0+), by gen_ai.response.model
+openclaw.llm.tokens.prompt       # counter, per real call (0.11.0+)
+openclaw.llm.tokens.completion   # counter, per real call (0.11.0+)
+openclaw.llm.cost.usd            # counter, per agent turn (still turn-level only — no per-call cost field exists anywhere in OpenClaw's plugin API), by gen_ai.response.model
 openclaw.tool.calls              # counter
 openclaw.session.resets          # counter
 ```
@@ -568,4 +568,5 @@ Reduce trace volume with `sampleRate`:
 | Debugging specific requests | Custom |
 | Understanding agent behavior | Custom |
 | Tool execution analysis | Custom |
-| Complete observability | Both |
+
+**Don't run both at once.** Both plugins initialize their own OTel SDK instance against the same process — running them together risks double-registered global providers and duplicate/conflicting export, not "complete observability." Pick one; see `docs/limitations.md` and `docs/index.md` for the full reasoning. This table previously recommended running both for "complete observability" — that guidance was wrong and has been corrected here to match the rest of this plugin's docs.

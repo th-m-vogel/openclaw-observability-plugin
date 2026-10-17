@@ -115,7 +115,7 @@ Works with any OTLP-compatible backend:
 - [Configuration](configuration.md) — All options explained
 - [Architecture](architecture.md) — How it works
 - [Limitations](limitations.md) — Known constraints
-- [Telemetry Reference](telemetry/) — Metric/trace details
+- [Telemetry Reference](telemetry/metrics.md) — Metric/trace details ([tokens](telemetry/tokens.md), [traces](telemetry/traces.md))
 
 ### Security Monitoring
 

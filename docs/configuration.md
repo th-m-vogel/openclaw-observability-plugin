@@ -10,6 +10,7 @@ Configure the custom hook-based OTel observability plugin via `~/.openclaw/openc
     "entries": {
       "otel-observability": {
         "enabled": true,
+        "hooks": { "allowConversationAccess": true },
         "config": {
           "endpoint": "http://localhost:4318",
           "protocol": "http",
@@ -30,6 +31,10 @@ Configure the custom hook-based OTel observability plugin via `~/.openclaw/openc
 ```
 
 ## Configuration Reference
+
+### `plugins.entries.otel-observability.hooks.allowConversationAccess`
+
+Required, boolean, defaults to **unset/false**. Sits next to `config`, not inside it — a sibling field on the plugin entry (see example above). Required on OpenClaw ≥ 2026.4.23 for a path-loaded (non-bundled) plugin to receive conversation-scoped typed-hook events at all (`before_model_resolve`, `llm_input`/`llm_output`, `agent_end`, and the rest). Without it, those hook registrations are silently dropped — the plugin still logs its "registered" banners, but the handlers never fire, so no `openclaw.agent.turn`/model-call spans or per-call token metrics reach your backend, with no error logged anywhere. This only gates *that these events reach the plugin*, not conversation content — content capture is the separate `captureContent` option below, off by default. See [Getting Started](./getting-started.md#step-3-configure-openclaw) for the full explanation and [Hooks register but never fire](./getting-started.md#hooks-register-but-never-fire) if spans aren't showing up.
 
 ### `plugins.entries.otel-observability.config`
 

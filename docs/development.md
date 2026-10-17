@@ -163,7 +163,7 @@ mkdocs gh-deploy
 
 ## Cutting a release
 
-This fork is **not published to npm** (see [README → Installation](../README.md#installation)). To cut a release:
+This fork is **not published to npm** (see [README → Quick start](../README.md#quick-start)). To cut a release:
 
 ```bash
 # Bump version in package.json and openclaw.plugin.json
@@ -171,7 +171,7 @@ This fork is **not published to npm** (see [README → Installation](../README.m
 git tag v0.X.0 && git push origin v0.X.0
 ```
 
-Users install by cloning the repo at that tag and loading it by path — see [README → Installation](../README.md#installation) for the full steps.
+Users install by cloning the repo at that tag and loading it by path — see [README → Quick start](../README.md#quick-start) for the full steps.
 
 ## Contributing
 

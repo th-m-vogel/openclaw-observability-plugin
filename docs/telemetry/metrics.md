@@ -6,7 +6,7 @@ All metrics use the `openclaw.*` namespace and are exported via OTLP at the conf
 
 > **0.11.0+:** `openclaw.llm.requests` and `.duration` record once per real model API call, from the `model_call_started`/`model_call_ended` hook pair, instead of once per **agent turn** from the `model.usage` diagnostic event (a turn may cover several real calls in a tool-use loop).
 >
-> **0.12.0+ (requires OpenClaw v2026.9.8+):** `openclaw.llm.tokens.*` (prompt/completion/total, including the cache_read/cache_write breakdown) also moved to a per-call source — `model.call.completed`/`model.call.error` *diagnostic events* (via `onInternalDiagnosticEvent`, a different mechanism than the hook pair above). These carry genuine call-scoped usage (`observer.usageField()`) confirmed since that release; the hook pair itself still carries none. `openclaw.llm.cost.usd` is unchanged — still once per agent turn, from `model.usage` — because no per-call cost field exists anywhere in OpenClaw's plugin API. If you're upgrading a dashboard or alert built against pre-0.12.0 semantics: `.tokens.*` cardinality changed the same way `.requests`/`.duration` did in 0.11.0 (one increment per real call instead of per turn), **and so did its labels**, to match `.requests`/`.duration` exactly: `gen_ai.operation.name` is now `"chat"` (was `"invoke_agent"`), `gen_ai.agent.id` is now present when known, and `gen_ai.provider.name`/`openclaw.provider` are omitted entirely when the provider is unknown (was always set, including to the literal string `"unknown"`). A panel filtering on the old `operation_name="invoke_agent"` value will silently stop matching `.tokens.*` — update it to `"chat"`, the same value `.requests`/`.duration` already use. `.cost.usd` behaves exactly as before, including its labels.
+> **0.11.0+ (requires OpenClaw v2026.9.8+):** `openclaw.llm.tokens.*` (prompt/completion/total, including the cache_read/cache_write breakdown) also moved to a per-call source — `model.call.completed`/`model.call.error` *diagnostic events* (via `onInternalDiagnosticEvent`, a different mechanism than the hook pair above). These carry genuine call-scoped usage (`observer.usageField()`) confirmed since that release; the hook pair itself still carries none. `openclaw.llm.cost.usd` is unchanged — still once per agent turn, from `model.usage` — because no per-call cost field exists anywhere in OpenClaw's plugin API. If you're upgrading a dashboard or alert built against pre-0.11.0 semantics: `.tokens.*` cardinality changed the same way `.requests`/`.duration` did (one increment per real call instead of per turn), **and so did its labels**, to match `.requests`/`.duration` exactly: `gen_ai.operation.name` is now `"chat"` (was `"invoke_agent"`), `gen_ai.agent.id` is now present when known, and `gen_ai.provider.name`/`openclaw.provider` are omitted entirely when the provider is unknown (was always set, including to the literal string `"unknown"`). A panel filtering on the old `operation_name="invoke_agent"` value will silently stop matching `.tokens.*` — update it to `"chat"`, the same value `.requests`/`.duration` already use. `.cost.usd` behaves exactly as before, including its labels.
 
 ### `openclaw.llm.requests`
 
@@ -41,9 +41,9 @@ Counts failed LLM calls (rate limits, timeouts, invalid requests, etc.). A spike
 | **Type** | Counter |
 | **Unit** | tokens |
 | **Attributes** | `gen_ai.response.model`, `gen_ai.conversation.id`, `gen_ai.provider.name` (when known) |
-| **Description** | Total tokens consumed per agent turn (prompt + completion + cache read + cache write) |
+| **Description** | Total tokens consumed per real model API call (prompt + completion + cache read + cache write) |
 
-The primary cost metric. Combine with model information to estimate costs. Deduplicated (0.11.0+) against a known core bug ([openclaw/openclaw#166289](https://github.com/openclaw/openclaw/issues/166289)) where the underlying `model.usage` event occasionally dispatches twice for the same real completion.
+The primary token-volume metric. Combine with model information to estimate costs (see `openclaw.llm.cost.usd` for the plugin's own turn-level cost figure). Unlike `openclaw.llm.cost.usd`, this metric does **not** need the plugin's own `#166289` dedup guard — it comes from `model.call.completed`/`model.call.error`, which core itself idempotency-guards per call (a one-shot `observer.state.terminalEventEmitted` flag), a structurally different and already-safe emission path from `model.usage` (the event `#166289` actually affects).
 
 ---
 
@@ -54,7 +54,7 @@ The primary cost metric. Combine with model information to estimate costs. Dedup
 | **Type** | Counter |
 | **Unit** | tokens |
 | **Attributes** | Same as `openclaw.llm.tokens.total`, plus `token.type` (`cache_read`/`cache_write`) on the cache-token increments |
-| **Description** | Prompt tokens consumed per agent turn |
+| **Description** | Prompt tokens consumed per real model API call |
 
 Tracks input tokens. High prompt token counts may indicate large system prompts, long conversation histories, or excessive context injection. Note this grows with real, incremental usage turn-over-turn — in a non-caching provider, each turn in a long conversation legitimately carries more input than the last, since the full history gets resent; that's real billed usage, not double-counting.
 
@@ -67,7 +67,7 @@ Tracks input tokens. High prompt token counts may indicate large system prompts,
 | **Type** | Counter |
 | **Unit** | tokens |
 | **Attributes** | Same as `openclaw.llm.tokens.total` |
-| **Description** | Completion tokens consumed per agent turn |
+| **Description** | Completion tokens consumed per real model API call |
 
 Tracks output tokens. Useful for understanding response verbosity.
 
@@ -86,7 +86,7 @@ Latency distribution for individual LLM calls (not full agent turns — see `ope
 
 ### Why can't tokens/cost be per-call too?
 
-`openclaw.llm.requests`/`.duration` moved to a per-call hook in 0.11.0 because they don't need any usage data — a call either happened or it didn't, and timing is always available. `openclaw.llm.tokens.*` needed OpenClaw core to tell the plugin how many tokens a given call used; that didn't exist on the obvious-looking hook pair (`model_call_started`/`model_call_ended`, which deliberately carries no usage), but does exist, since v2026.9.8, on the separate `model.call.completed`/`model.call.error` diagnostic events, which this plugin adopted in 0.12.0. See `docs/limitations.md` for the full investigation and what's still turn-level only (cost).
+`openclaw.llm.requests`/`.duration` moved to a per-call hook in 0.11.0 because they don't need any usage data — a call either happened or it didn't, and timing is always available. `openclaw.llm.tokens.*` needed OpenClaw core to tell the plugin how many tokens a given call used; that didn't exist on the obvious-looking hook pair (`model_call_started`/`model_call_ended`, which deliberately carries no usage), but does exist, since v2026.9.8, on the separate `model.call.completed`/`model.call.error` diagnostic events, which this plugin adopted in 0.11.0. See `docs/limitations.md` for the full investigation and what's still turn-level only (cost).
 
 ## Tool Metrics
 
