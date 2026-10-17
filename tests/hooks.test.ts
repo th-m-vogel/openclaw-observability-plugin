@@ -211,6 +211,7 @@ const config: OtelObservabilityConfig = {
   captureContent: { ...CONTENT_POLICY_DISABLED },
   metricsIntervalMs: 30_000,
   resourceAttributes: {},
+  collapseEphemeralSessions: false,
 };
 
 function configWithPolicy(
@@ -220,6 +221,10 @@ function configWithPolicy(
     ...config,
     captureContent: { ...CONTENT_POLICY_DISABLED, ...overrides },
   };
+}
+
+function configWithCollapse(collapseEphemeralSessions: boolean): OtelObservabilityConfig {
+  return { ...config, collapseEphemeralSessions };
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -3951,6 +3956,131 @@ describe("lifecycle span re-parenting (ISI-1653)", () => {
     expect(dispatchSpan).toBeDefined();
     expect(trace.getSpanContext(dispatchSpan.parentContext as any)?.spanId).toBe(turnSpan.id);
     expect(dispatchSpan.attrs["openclaw.trace.parent_source"]).toBe("agent");
+
+    stopHooks();
+  });
+});
+
+describe("collapseEphemeralSessions (metric labels only)", () => {
+  let stopHooks: () => void;
+  const cronSessionKey =
+    "agent:main:cron:job1:run:28c489cb-aaaa-bbbb-cccc-dddddddddddd";
+  const collapsedSessionKey = "agent:main:cron:job1";
+
+  it("model_call_ended: labels openclaw.llm.requests with the raw session key when collapseEphemeralSessions is false", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithCollapse(false));
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "main", sessionKey: cronSessionKey });
+    typedHooks.get("model_call_started")!(
+      { sessionKey: cronSessionKey, model: "claude-3.5-sonnet", provider: "anthropic", agentId: "main" },
+      { sessionKey: cronSessionKey },
+    );
+    typedHooks.get("model_call_ended")!(
+      { sessionKey: cronSessionKey, responseModel: "claude-3.5-sonnet", durationMs: 100 },
+      { sessionKey: cronSessionKey },
+    );
+
+    expect(telemetry.counters.llmRequests.add).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ "gen_ai.conversation.id": cronSessionKey }),
+    );
+
+    stopHooks();
+  });
+
+  it("model_call_ended: labels openclaw.llm.requests with the collapsed key when collapseEphemeralSessions is true", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithCollapse(true));
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "main", sessionKey: cronSessionKey });
+    typedHooks.get("model_call_started")!(
+      { sessionKey: cronSessionKey, model: "claude-3.5-sonnet", provider: "anthropic", agentId: "main" },
+      { sessionKey: cronSessionKey },
+    );
+    typedHooks.get("model_call_ended")!(
+      { sessionKey: cronSessionKey, responseModel: "claude-3.5-sonnet", durationMs: 100 },
+      { sessionKey: cronSessionKey },
+    );
+
+    expect(telemetry.counters.llmRequests.add).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ "gen_ai.conversation.id": collapsedSessionKey }),
+    );
+
+    stopHooks();
+  });
+
+  it("model_call_ended: the CLIENT span attribute still carries the full, uncollapsed session key when collapseEphemeralSessions is true", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithCollapse(true));
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "main", sessionKey: cronSessionKey });
+    typedHooks.get("model_call_started")!(
+      { sessionKey: cronSessionKey, model: "claude-3.5-sonnet", provider: "anthropic", agentId: "main" },
+      { sessionKey: cronSessionKey },
+    );
+    typedHooks.get("model_call_ended")!(
+      { sessionKey: cronSessionKey, responseModel: "claude-3.5-sonnet", durationMs: 100 },
+      { sessionKey: cronSessionKey },
+    );
+
+    const chatSpan = spans.find((s) => s.spanName === "chat claude-3.5-sonnet");
+    expect(chatSpan).toBeDefined();
+    expect(chatSpan!.attrs["gen_ai.conversation.id"]).toBe(cronSessionKey);
+
+    stopHooks();
+  });
+
+  it("before_tool_call: openclaw.tool.approvals is labeled with the collapsed key when enabled", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithCollapse(true));
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "main", sessionKey: cronSessionKey });
+    typedHooks.get("before_tool_call")!(
+      { toolName: "Bash", toolCallId: "tc-collapse-1", requiresApproval: true },
+      { sessionKey: cronSessionKey, agentId: "main" },
+    );
+
+    expect(telemetry.counters.toolApprovals.add).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ "gen_ai.conversation.id": collapsedSessionKey }),
+    );
+
+    stopHooks();
+  });
+
+  it("tool_result_persist / after_tool_call: openclaw.tool.calls and .tool_call_duration are labeled with the collapsed key when enabled", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithCollapse(true));
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "main", sessionKey: cronSessionKey });
+    typedHooks.get("before_tool_call")!(
+      { toolName: "Write", toolCallId: "tc-collapse-2", input: { path: "/tmp/out" } },
+      { sessionKey: cronSessionKey, agentId: "main" },
+    );
+    typedHooks.get("after_tool_call")!(
+      {
+        toolName: "Write",
+        toolCallId: "tc-collapse-2",
+        message: { content: [{ type: "text", text: "ok" }] },
+      },
+      { sessionKey: cronSessionKey },
+    );
+
+    expect(telemetry.counters.toolCalls.add).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ "gen_ai.conversation.id": collapsedSessionKey }),
+    );
+    expect(telemetry.histograms.toolCallDuration.record).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({ "gen_ai.conversation.id": collapsedSessionKey }),
+    );
 
     stopHooks();
   });
