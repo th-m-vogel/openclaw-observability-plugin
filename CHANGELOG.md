@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-Nothing yet — `0.12.0-dev`.
+### Added
+
+* **metrics:** new opt-in `collapseEphemeralSessions` config option (default `false`). When enabled, collapses ephemeral per-run session-key shapes (recurring cron jobs, internal-session-effect turns) to a stable, job-level identifier on metric `gen_ai.conversation.id` labels — fixes a "tokens by session"/"cost by session" dashboard panel being buried in dozens of near-identical one-shot rows for a recurring job. Applies to `openclaw.llm.requests`/`.errors`/`.duration`/`.tokens.*`/`.cost.usd` (`src/hooks.ts`'s per-call metrics and `src/diagnostics.ts`'s token/cost metrics) and `openclaw.tool.calls`/`.tool_call_duration`/`.approvals` (`src/hooks.ts`). Trace spans and log lines always keep the full, uncollapsed session key for drill-down — this is a metrics-labels-only transform. Recognizes two positional suffix shapes (a trailing `:run:<uuid>`, a trailing `_<uuid>`) rather than any UUID anywhere in the key, so a cron job's own stable ID or a channel/user ID is never mistakenly collapsed. This is a dashboard-legibility feature, not a fix for the `rate()`/`increase()` one-shot-series blind spot described in `docs/limitations.md` — see that doc for the distinction.
 
 ## [0.11.0](https://github.com/th-m-vogel/openclaw-observability-plugin/compare/v0.10.0...v0.11.0) (2026-10-11)
 

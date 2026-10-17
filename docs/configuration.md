@@ -56,6 +56,9 @@ Plugin entry configuration.
 | `logConfig` | object | — | Log filtering and exclusion rules |
 | `signalEndpoints` | object | — | Per-signal OTLP endpoint overrides (`metrics`/`logs`/`traces`); falls back to `endpoint` |
 | `signalHeaders` | object | — | Per-signal header overrides (`metrics`/`logs`/`traces`); replaces `headers` entirely for that signal |
+| `collapseEphemeralSessions` | boolean | `false` | Collapse ephemeral per-run session keys (recurring cron jobs, internal-session-effect turns) to a stable job-level identifier **on metric labels only** — see [Metrics Reference](./telemetry/metrics.md#collapseephemeralsessions-metrics-only) for which metrics this affects and [Limitations](./limitations.md) for why it exists |
+
+`collapseEphemeralSessions` recognizes two session-key shapes commonly produced by recurring background work: a trailing per-run identifier after `:run:` (e.g. a cron job's per-run session key), and a trailing per-run identifier after an underscore (e.g. an internal-session-effect turn's key). When enabled, metrics for a matching session key are labeled with the stable part only, instead of a fresh identifier every run — so a "tokens by session" dashboard panel shows one row per job instead of one row per run. Traces and logs are unaffected and always carry the full, per-run session key for drill-down. Default `false`: existing dashboards keep working unmodified unless you opt in.
 
 ## Endpoint Configuration
 
