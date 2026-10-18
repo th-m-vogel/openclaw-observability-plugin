@@ -46,6 +46,7 @@ import {
 } from "./security.js";
 import { TraceContextStore } from "./trace-context-store.js";
 import { resolveMetricConversationId } from "./metric-session-key.js";
+import { stripToModelTierAttrs } from "./metric-by-model.js";
 import { extractTraceContext } from "./propagation.js";
 import {
   GEN_AI_AGENT_ID,
@@ -1292,6 +1293,18 @@ export function registerHooks(
             if (typeof durationMs === "number") {
               histograms.llmDuration.record(durationMs, metricAttrs);
               histograms.genAiOperationDuration.record(durationMs / 1000, metricAttrs);
+            }
+
+            if (config.enableByModelMetrics) {
+              const byModelAttrs = stripToModelTierAttrs(metricAttrs);
+              counters.llmRequestsByModel.add(1, byModelAttrs);
+              if (errorMsg) {
+                counters.llmErrorsByModel.add(1, byModelAttrs);
+              }
+              if (typeof durationMs === "number") {
+                histograms.llmDurationByModel.record(durationMs, byModelAttrs);
+                histograms.genAiOperationDurationByModel.record(durationMs / 1000, byModelAttrs);
+              }
             }
           }
         } catch {

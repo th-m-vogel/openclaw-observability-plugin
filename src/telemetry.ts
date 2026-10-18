@@ -138,6 +138,10 @@ export interface OtelCounters {
   llmRequests: Counter;
   /** Total LLM errors */
   llmErrors: Counter;
+  /** Total LLM API requests, aggregated by provider+model (rate-able even for one-shot sessions) */
+  llmRequestsByModel: Counter;
+  /** Total LLM API errors, aggregated by provider+model (rate-able even for one-shot sessions) */
+  llmErrorsByModel: Counter;
   /** Total tokens (prompt + completion) */
   tokensTotal: Counter;
   /** Prompt tokens */
@@ -223,6 +227,10 @@ export interface OtelHistograms {
   genAiOperationDuration: Histogram;
   /** Stable GenAI client token usage (tokens); use with gen_ai.token.type attr. */
   genAiTokenUsage: Histogram;
+  /** LLM request duration, aggregated by provider+model (rate-able even for one-shot sessions) */
+  llmDurationByModel: Histogram;
+  /** GenAI operation duration, aggregated by provider+model (rate-able even for one-shot sessions); openclaw-namespaced sibling of the stable gen_ai.client.* semconv metric */
+  genAiOperationDurationByModel: Histogram;
   /** Cron execution duration in ms */
   cronDuration: Histogram;
   /** Sub-agent duration in ms */
@@ -466,6 +474,14 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Total LLM API errors",
       unit: "errors",
     }),
+    llmRequestsByModel: meter.createCounter("openclaw.llm.requests_by_model", {
+      description: "Total LLM API requests, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "requests",
+    }),
+    llmErrorsByModel: meter.createCounter("openclaw.llm.errors_by_model", {
+      description: "Total LLM API errors, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "errors",
+    }),
     tokensTotal: meter.createCounter("openclaw.llm.tokens.total", {
       description: "Total tokens consumed (prompt + completion)",
       unit: "tokens",
@@ -638,6 +654,14 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     genAiTokenUsage: meter.createHistogram(METRIC_TOKEN_USAGE, {
       description: "Number of input and output tokens used (stable semconv)",
       unit: "{token}",
+    }),
+    llmDurationByModel: meter.createHistogram("openclaw.llm.duration_by_model", {
+      description: "LLM request duration, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "ms",
+    }),
+    genAiOperationDurationByModel: meter.createHistogram("openclaw.genai.client.operation.duration_by_model", {
+      description: "GenAI operation duration, aggregated by provider+model (rate-able even for one-shot sessions); openclaw-namespaced sibling of the stable gen_ai.client.* semconv metric",
+      unit: "s",
     }),
     cronDuration: meter.createHistogram("openclaw.cron.duration", {
       description: "Cron execution duration",

@@ -134,6 +134,8 @@ function createTelemetry(): { telemetry: TelemetryRuntime; spans: Array<Span & S
     counters: {
       llmRequests: noopCounter(),
       llmErrors: noopCounter(),
+      llmRequestsByModel: noopCounter(),
+      llmErrorsByModel: noopCounter(),
       tokensTotal: noopCounter(),
       tokensPrompt: noopCounter(),
       tokensCompletion: noopCounter(),
@@ -159,6 +161,8 @@ function createTelemetry(): { telemetry: TelemetryRuntime; spans: Array<Span & S
       genAiTokenUsage: noopHistogram(),
       genAiOperationDuration: noopHistogram(),
       llmDuration: noopHistogram(),
+      llmDurationByModel: noopHistogram(),
+      genAiOperationDurationByModel: noopHistogram(),
       toolCallDuration: noopHistogram(),
       cronDuration: noopHistogram(),
       subagentDuration: noopHistogram(),
@@ -212,6 +216,7 @@ const config: OtelObservabilityConfig = {
   metricsIntervalMs: 30_000,
   resourceAttributes: {},
   collapseEphemeralSessions: false,
+  enableByModelMetrics: false,
 };
 
 function configWithPolicy(
@@ -225,6 +230,10 @@ function configWithPolicy(
 
 function configWithCollapse(collapseEphemeralSessions: boolean): OtelObservabilityConfig {
   return { ...config, collapseEphemeralSessions };
+}
+
+function configWithByModel(enableByModelMetrics: boolean): OtelObservabilityConfig {
+  return { ...config, enableByModelMetrics };
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -766,6 +775,72 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
     );
 
     expect(telemetry.counters.llmErrors.add).toHaveBeenCalledWith(1, expect.any(Object));
+
+    stopHooks();
+  });
+
+  it("model_call_ended also records a _by_model sibling for requests/errors/duration when enableByModelMetrics is on, without conversation id or agent id", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithByModel(true));
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const modelStarted = typedHooks.get("model_call_started")!;
+    const modelEnded = typedHooks.get("model_call_ended")!;
+
+    resolve({}, { agentId: "main", sessionKey: "s-bymodel" });
+    modelStarted(
+      { sessionKey: "s-bymodel", model: "claude-3.5-sonnet", provider: "anthropic", agentId: "main" },
+      { sessionKey: "s-bymodel" },
+    );
+    modelEnded(
+      {
+        sessionKey: "s-bymodel",
+        responseModel: "claude-3.5-sonnet",
+        error: "boom",
+        usage: { input: 10, output: 0 },
+        durationMs: 500,
+      },
+      { sessionKey: "s-bymodel" },
+    );
+
+    const expectedByModelAttrs = {
+      "gen_ai.response.model": "claude-3.5-sonnet",
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": "anthropic",
+      "openclaw.provider": "anthropic",
+    };
+    expect(telemetry.counters.llmRequestsByModel.add).toHaveBeenCalledWith(1, expectedByModelAttrs);
+    expect(telemetry.counters.llmErrorsByModel.add).toHaveBeenCalledWith(1, expectedByModelAttrs);
+    expect(telemetry.histograms.llmDurationByModel.record).toHaveBeenCalledWith(500, expectedByModelAttrs);
+    expect(telemetry.histograms.genAiOperationDurationByModel.record).toHaveBeenCalledWith(0.5, expectedByModelAttrs);
+
+    stopHooks();
+  });
+
+  it("model_call_ended does NOT record any _by_model sibling when enableByModelMetrics is off (default)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithByModel(false));
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const modelStarted = typedHooks.get("model_call_started")!;
+    const modelEnded = typedHooks.get("model_call_ended")!;
+
+    resolve({}, { agentId: "main", sessionKey: "s-off" });
+    modelStarted(
+      { sessionKey: "s-off", model: "claude-3.5-sonnet", provider: "anthropic", agentId: "main" },
+      { sessionKey: "s-off" },
+    );
+    modelEnded(
+      { sessionKey: "s-off", responseModel: "claude-3.5-sonnet", error: "boom", durationMs: 500 },
+      { sessionKey: "s-off" },
+    );
+
+    expect(telemetry.counters.llmRequestsByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.llmErrorsByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.histograms.llmDurationByModel.record).not.toHaveBeenCalled();
+    expect(telemetry.histograms.genAiOperationDurationByModel.record).not.toHaveBeenCalled();
 
     stopHooks();
   });
