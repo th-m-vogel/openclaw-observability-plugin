@@ -45,6 +45,7 @@ import {
   type SecurityCounters,
 } from "./security.js";
 import { TraceContextStore } from "./trace-context-store.js";
+import { resolveMetricConversationId } from "./metric-session-key.js";
 import { extractTraceContext } from "./propagation.js";
 import {
   GEN_AI_AGENT_ID,
@@ -1274,7 +1275,7 @@ export function registerHooks(
             const metricAttrs: Record<string, string> = {
               [GEN_AI_RESPONSE_MODEL]: responseModel,
               [GEN_AI_OPERATION_NAME]: OP_CHAT,
-              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              [GEN_AI_CONVERSATION_ID]: resolveMetricConversationId(sessionKey, config),
             };
             if (provider && provider !== "unknown") {
               metricAttrs[GEN_AI_PROVIDER_NAME] = provider;
@@ -1482,7 +1483,7 @@ export function registerHooks(
           span.setAttribute(OPENCLAW_TOOL_APPROVAL_REQUESTED, true);
           counters.toolApprovals.add(1, {
             [GEN_AI_TOOL_NAME]: toolName,
-            [GEN_AI_CONVERSATION_ID]: sessionKey,
+            [GEN_AI_CONVERSATION_ID]: resolveMetricConversationId(sessionKey, config),
           });
         }
 
@@ -1537,7 +1538,7 @@ export function registerHooks(
         counters.toolCalls.add(1, {
           [GEN_AI_TOOL_NAME]: toolName,
           [GEN_AI_OPERATION_NAME]: OP_EXECUTE_TOOL,
-          [GEN_AI_CONVERSATION_ID]: sessionKey,
+          [GEN_AI_CONVERSATION_ID]: resolveMetricConversationId(sessionKey, config),
         });
 
         span.setAttribute("openclaw.tool.duration_ms", durationMs);
@@ -1589,7 +1590,7 @@ export function registerHooks(
 
         histograms.toolCallDuration.record(durationMs, {
           [GEN_AI_TOOL_NAME]: toolName,
-          [GEN_AI_CONVERSATION_ID]: sessionKey,
+          [GEN_AI_CONVERSATION_ID]: resolveMetricConversationId(sessionKey, config),
         });
 
         span.end();
@@ -1735,7 +1736,7 @@ export function registerHooks(
         counters.toolCalls.add(1, {
           [GEN_AI_TOOL_NAME]: toolName,
           [GEN_AI_OPERATION_NAME]: OP_EXECUTE_TOOL,
-          [GEN_AI_CONVERSATION_ID]: sessionKey,
+          [GEN_AI_CONVERSATION_ID]: resolveMetricConversationId(sessionKey, config),
         });
 
         const parentContext = sessionCtx?.agentContext || sessionCtx?.rootContext || context.active();

@@ -108,6 +108,14 @@ export interface OtelObservabilityConfig {
    * (e.g. a different `APIKEY` per IONOS pipeline).
    */
   signalHeaders?: Partial<Record<OtelSignal, Record<string, string>>>;
+  /**
+   * When true, collapses ephemeral per-run session-key shapes (recurring
+   * cron runs, internal-session-effect turns) to a stable, job-level
+   * identifier on metric labels only — traces and logs always keep the
+   * full session key. Default false (full passthrough). See
+   * docs/configuration.md and docs/limitations.md.
+   */
+  collapseEphemeralSessions: boolean;
 }
 
 export const CONTENT_POLICY_DISABLED: ContentCapturePolicy = Object.freeze({
@@ -139,6 +147,7 @@ const DEFAULTS: OtelObservabilityConfig = {
   captureContent: { ...CONTENT_POLICY_DISABLED },
   metricsIntervalMs: 30_000,
   resourceAttributes: {},
+  collapseEphemeralSessions: false,
 };
 
 /**
@@ -320,6 +329,10 @@ export function parseConfig(
     traces: typeof obj.traces === "boolean" ? obj.traces : DEFAULTS.traces,
     metrics: typeof obj.metrics === "boolean" ? obj.metrics : DEFAULTS.metrics,
     logs: typeof obj.logs === "boolean" ? obj.logs : DEFAULTS.logs,
+    collapseEphemeralSessions:
+      typeof obj.collapseEphemeralSessions === "boolean"
+        ? obj.collapseEphemeralSessions
+        : DEFAULTS.collapseEphemeralSessions,
     captureContent: normalizeContentCapturePolicy(obj.captureContent),
     metricsIntervalMs:
       typeof obj.metricsIntervalMs === "number" && obj.metricsIntervalMs >= 1000

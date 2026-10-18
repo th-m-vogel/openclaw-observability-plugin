@@ -46,6 +46,7 @@ function createConfig(overrides: Partial<OtelObservabilityConfig> = {}): OtelObs
     captureContent: { ...CONTENT_POLICY_DISABLED },
     metricsIntervalMs: 30_000,
     resourceAttributes: {},
+    collapseEphemeralSessions: false,
     ...overrides,
   };
 }
