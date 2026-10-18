@@ -75,6 +75,11 @@
       "label": "Collapse Ephemeral Session IDs (Metrics Only)",
       "help": "Collapse ephemeral per-run session keys (recurring cron jobs, internal-session-effect turns) to a stable job-level identifier on metric labels only. Traces and logs always keep the full per-run session key. Default off.",
       "advanced": true
+    },
+    "enableByModelMetrics": {
+      "label": "Enable Per-Model Low-Granularity Metrics",
+      "help": "Adds a `_by_model` sibling for every per-conversation LLM metric (requests/errors/duration/tokens/cost), dropping the conversation ID so the sibling stays rate-able even for a one-shot session. This roughly doubles the number of LLM metric data points emitted — if your metrics backend is a managed service billed by data volume or storage, check its pricing before enabling. Default off.",
+      "advanced": true
     }
   },
   "configSchema": {
@@ -196,6 +201,10 @@
       "collapseEphemeralSessions": {
         "type": "boolean",
         "description": "Collapse ephemeral per-run session-key shapes (recurring cron jobs, internal-session-effect turns) to a stable, job-level identifier on metric labels only. Traces and logs always keep the full per-run session key."
+      },
+      "enableByModelMetrics": {
+        "type": "boolean",
+        "description": "Adds a _by_model sibling for every per-conversation LLM metric, with gen_ai.conversation.id/gen_ai.agent.id dropped so it stays rate-able even for a one-shot session. Roughly doubles LLM metric data-point volume — check your metrics backend's pricing (data volume/storage charges) before enabling. Default false."
       }
     }
   }

@@ -426,6 +426,20 @@ describe("parseConfig — collapseEphemeralSessions", () => {
   });
 });
 
+describe("parseConfig — enableByModelMetrics", () => {
+  it("defaults to false when unset", () => {
+    expect(parseConfig({}).enableByModelMetrics).toBe(false);
+  });
+
+  it("accepts an explicit true", () => {
+    expect(parseConfig({ enableByModelMetrics: true }).enableByModelMetrics).toBe(true);
+  });
+
+  it("coerces a non-boolean value to the default (false)", () => {
+    expect(parseConfig({ enableByModelMetrics: "yes" as any }).enableByModelMetrics).toBe(false);
+  });
+});
+
 describe("openclaw.plugin.json manifest parity", () => {
   it("every OtelObservabilityConfig key accepted by parseConfig is declared in configSchema.properties", async () => {
     const fs = await import("node:fs");

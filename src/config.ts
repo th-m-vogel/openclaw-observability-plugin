@@ -116,6 +116,16 @@ export interface OtelObservabilityConfig {
    * docs/configuration.md and docs/limitations.md.
    */
   collapseEphemeralSessions: boolean;
+  /**
+   * When true, emits a `_by_model` sibling for every per-conversation LLM
+   * metric (same value, same attributes minus `gen_ai.conversation.id`/
+   * `gen_ai.agent.id`) — fixes `rate()`/`increase()` returning zero for a
+   * one-shot session. Default false: this roughly doubles the number of
+   * data points OpenClaw's LLM metrics produce, which has a direct cost
+   * impact on a billed-by-volume managed metrics backend. See
+   * docs/telemetry/metrics.md and docs/limitations.md.
+   */
+  enableByModelMetrics: boolean;
 }
 
 export const CONTENT_POLICY_DISABLED: ContentCapturePolicy = Object.freeze({
@@ -148,6 +158,7 @@ const DEFAULTS: OtelObservabilityConfig = {
   metricsIntervalMs: 30_000,
   resourceAttributes: {},
   collapseEphemeralSessions: false,
+  enableByModelMetrics: false,
 };
 
 /**
@@ -333,6 +344,10 @@ export function parseConfig(
       typeof obj.collapseEphemeralSessions === "boolean"
         ? obj.collapseEphemeralSessions
         : DEFAULTS.collapseEphemeralSessions,
+    enableByModelMetrics:
+      typeof obj.enableByModelMetrics === "boolean"
+        ? obj.enableByModelMetrics
+        : DEFAULTS.enableByModelMetrics,
     captureContent: normalizeContentCapturePolicy(obj.captureContent),
     metricsIntervalMs:
       typeof obj.metricsIntervalMs === "number" && obj.metricsIntervalMs >= 1000

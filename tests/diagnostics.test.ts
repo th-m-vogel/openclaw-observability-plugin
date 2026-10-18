@@ -44,6 +44,7 @@ function createHistogram() {
 function createTelemetry() {
   return {
     counters: {
+      costUsd: createCounter(),
       llmRequests: createCounter(),
       tokensCompletion: createCounter(),
       tokensPrompt: createCounter(),
@@ -52,11 +53,20 @@ function createTelemetry() {
       tokensToolResult: createCounter(),
       tokensTotal: createCounter(),
       tokensUser: createCounter(),
+      tokensTotalByModel: createCounter(),
+      tokensPromptByModel: createCounter(),
+      tokensCompletionByModel: createCounter(),
+      tokensSystemByModel: createCounter(),
+      tokensUserByModel: createCounter(),
+      tokensToolResultByModel: createCounter(),
+      tokensSkillByModel: createCounter(),
+      costUsdByModel: createCounter(),
     },
     histograms: {
       genAiOperationDuration: createHistogram(),
       genAiTokenUsage: createHistogram(),
       llmDuration: createHistogram(),
+      genAiTokenUsageByModel: createHistogram(),
     },
     meter: {
       createCounter: vi.fn(() => createCounter()),
@@ -83,7 +93,7 @@ async function registerWithEntry(
   entryFile: string,
   logger = createLogger(),
   telemetry = createTelemetry(),
-  config: unknown = { collapseEphemeralSessions: false },
+  config: unknown = { collapseEphemeralSessions: false, enableByModelMetrics: false },
 ) {
   const diagnostics = await loadFreshDiagnostics();
   const unsubscribe = await withArgvEntry(entryFile, () =>
@@ -234,10 +244,7 @@ describe("internal diagnostics export resolution", () => {
     expect(telemetry.counters.llmRequests.add).not.toHaveBeenCalled();
     expect(telemetry.histograms.llmDuration.record).not.toHaveBeenCalled();
     expect(telemetry.histograms.genAiOperationDuration.record).not.toHaveBeenCalled();
-    expect(telemetry.meter.createCounter).toHaveBeenCalledWith(
-      "openclaw.llm.cost.usd",
-      expect.any(Object),
-    );
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledWith(0.12, expect.any(Object));
   });
 
   it("suppresses an exact-duplicate model.usage dispatch (openclaw/openclaw#166289) so cost isn't double-counted", async () => {
@@ -265,10 +272,9 @@ describe("internal diagnostics export resolution", () => {
     await registerWithEntry(path.join(root, "openclaw.mjs"), logger, telemetry);
 
     // Cost is only recorded once, even though the event fired twice.
-    const costCounter = telemetry.meter.createCounter.mock.results[0]?.value;
-    expect(telemetry.meter.createCounter).toHaveBeenCalledTimes(1);
-    expect(costCounter.add).toHaveBeenCalledTimes(1);
-    expect(costCounter.add).toHaveBeenCalledWith(0.1666, expect.any(Object));
+    expect(telemetry.meter.createCounter).not.toHaveBeenCalled();
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledTimes(1);
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledWith(0.1666, expect.any(Object));
 
     // The second, duplicate dispatch is logged, not silently dropped.
     expect(logger.debug).toHaveBeenCalledWith(
@@ -297,8 +303,7 @@ describe("internal diagnostics export resolution", () => {
 
     await registerWithEntry(path.join(root, "openclaw.mjs"), logger, telemetry);
 
-    const costCounter = telemetry.meter.createCounter.mock.results[0]?.value;
-    expect(costCounter.add).toHaveBeenCalledTimes(1);
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledTimes(1);
     expect(logger.debug).toHaveBeenCalledWith(
       expect.stringContaining("suppressed duplicate dispatch"),
     );
@@ -324,7 +329,7 @@ describe("internal diagnostics export resolution", () => {
 
     await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
 
-    expect(telemetry.meter.createCounter).toHaveBeenCalledTimes(2);
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledTimes(2);
   });
 
   it("survives a malformed event (non-numeric costUsd) without crashing, logging it instead of throwing into core's dispatcher", async () => {
@@ -352,8 +357,7 @@ describe("internal diagnostics export resolution", () => {
 
     // Did not throw (registerWithEntry itself would have rejected), and
     // the well-formed event right after still landed normally.
-    const costCounter = telemetry.meter.createCounter.mock.results[0]?.value;
-    expect(costCounter.add).toHaveBeenCalledWith(0.05, expect.any(Object));
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledWith(0.05, expect.any(Object));
   });
 
   it("ignores non-function direct exports", async () => {
@@ -422,6 +426,80 @@ describe("model.call.completed / model.call.error diagnostic events", () => {
     );
   });
 
+  it("also records _by_model siblings for the per-call token metrics when enableByModelMetrics is on, without conversation id or agent id", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.call.completed",
+          sessionKey: "agent:main:new",
+          provider: "openai-compatible",
+          model: "example/model-1",
+          agentId: "main",
+          usage: { input: 1000, output: 200, cacheRead: 500, cacheWrite: 50, total: 1250 },
+          durationMs: 850,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(
+      path.join(root, "openclaw.mjs"),
+      createLogger(),
+      telemetry,
+      { collapseEphemeralSessions: false, enableByModelMetrics: true },
+    );
+
+    const byModelAttrs = {
+      "gen_ai.response.model": "example/model-1",
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": "openai-compatible",
+      "openclaw.provider": "openai-compatible",
+    };
+    expect(telemetry.counters.tokensPromptByModel.add).toHaveBeenCalledWith(1000, byModelAttrs);
+    expect(telemetry.counters.tokensCompletionByModel.add).toHaveBeenCalledWith(200, byModelAttrs);
+    expect(telemetry.counters.tokensPromptByModel.add).toHaveBeenCalledWith(
+      500,
+      { ...byModelAttrs, "token.type": "cache_read" },
+    );
+    expect(telemetry.counters.tokensPromptByModel.add).toHaveBeenCalledWith(
+      50,
+      { ...byModelAttrs, "token.type": "cache_write" },
+    );
+    expect(telemetry.counters.tokensTotalByModel.add).toHaveBeenCalledWith(1250, byModelAttrs);
+    expect(telemetry.histograms.genAiTokenUsageByModel.record).toHaveBeenCalledWith(
+      1000,
+      expect.objectContaining({ ...byModelAttrs, "gen_ai.token.type": "input" }),
+    );
+  });
+
+  it("does NOT record any _by_model sibling for the per-call token metrics when enableByModelMetrics is off (default)", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.call.completed",
+          sessionKey: "agent:main:new",
+          provider: "openai-compatible",
+          model: "example/model-1",
+          usage: { input: 1000, output: 200, total: 1200 },
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.tokensPromptByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensCompletionByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensTotalByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.histograms.genAiTokenUsageByModel.record).not.toHaveBeenCalled();
+  });
+
   it("records tokens from a model.call.error event when usage is present (provider billed tokens before erroring)", async () => {
     const root = makeInstallRoot();
     writeChunk(
@@ -466,6 +544,121 @@ describe("model.call.completed / model.call.error diagnostic events", () => {
     expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
     expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();
     expect(telemetry.counters.tokensTotal.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensPromptByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensCompletionByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensTotalByModel.add).not.toHaveBeenCalled();
+  });
+});
+
+describe("model.usage _by_model siblings for the token breakdown and cost", () => {
+  it("also records _by_model siblings when enableByModelMetrics is on, without conversation id", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.usage",
+          sessionKey: "agent:main:new",
+          provider: "anthropic",
+          model: "claude-3.5-sonnet",
+          usage: { system: 100, user: 200, toolResult: 50, skill: 25, total: 375 },
+          costUsd: 0.05,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(
+      path.join(root, "openclaw.mjs"),
+      createLogger(),
+      telemetry,
+      { collapseEphemeralSessions: false, enableByModelMetrics: true },
+    );
+
+    const byModelAttrs = {
+      "gen_ai.response.model": "claude-3.5-sonnet",
+      "gen_ai.operation.name": "invoke_agent",
+      "gen_ai.provider.name": "anthropic",
+      "openclaw.provider": "anthropic",
+    };
+    expect(telemetry.counters.tokensSystemByModel.add).toHaveBeenCalledWith(100, byModelAttrs);
+    expect(telemetry.counters.tokensUserByModel.add).toHaveBeenCalledWith(200, byModelAttrs);
+    expect(telemetry.counters.tokensToolResultByModel.add).toHaveBeenCalledWith(50, byModelAttrs);
+    expect(telemetry.counters.tokensSkillByModel.add).toHaveBeenCalledWith(25, byModelAttrs);
+    expect(telemetry.counters.costUsdByModel.add).toHaveBeenCalledWith(0.05, byModelAttrs);
+  });
+
+  it("does not record a _by_model increment for a falsy token-breakdown field", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.usage", sessionKey: "agent:main:new", provider: "anthropic",
+          model: "claude-3.5-sonnet", usage: { system: 100, toolResult: 0 }, costUsd: 0,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(
+      path.join(root, "openclaw.mjs"),
+      createLogger(),
+      telemetry,
+      { collapseEphemeralSessions: false, enableByModelMetrics: true },
+    );
+
+    expect(telemetry.counters.tokensToolResultByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.costUsdByModel.add).not.toHaveBeenCalled();
+  });
+
+  it("suppresses the _by_model siblings too on a duplicate dispatch, not just the raw metrics", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        const payload = {
+          type: "model.usage", sessionKey: "agent:main:new", provider: "anthropic",
+          model: "claude-3.5-sonnet", usage: { system: 100, total: 100 }, costUsd: 0.05,
+        };
+        listener(payload);
+        listener({ ...payload });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(
+      path.join(root, "openclaw.mjs"),
+      createLogger(),
+      telemetry,
+      { collapseEphemeralSessions: false, enableByModelMetrics: true },
+    );
+
+    expect(telemetry.counters.tokensSystemByModel.add).toHaveBeenCalledTimes(1);
+    expect(telemetry.counters.costUsdByModel.add).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT record any _by_model sibling when enableByModelMetrics is off (default)", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.usage", sessionKey: "agent:main:new", provider: "anthropic",
+          model: "claude-3.5-sonnet", usage: { system: 100, total: 100 }, costUsd: 0.05,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.tokensSystemByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.costUsdByModel.add).not.toHaveBeenCalled();
   });
 });
 
@@ -557,8 +750,7 @@ describe("collapseEphemeralSessions (metric labels only)", () => {
       { collapseEphemeralSessions: true },
     );
 
-    const costCounter = telemetry.meter.createCounter.mock.results[0]?.value;
-    expect(costCounter.add).toHaveBeenCalledWith(
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledWith(
       0.05,
       expect.objectContaining({ "gen_ai.conversation.id": collapsedEffectsKey }),
     );
@@ -595,7 +787,7 @@ describe("collapseEphemeralSessions (metric labels only)", () => {
     // recorded — the dedup guard must key on the raw sessionKey, not the
     // collapsed one, or these would wrongly look like the same duplicate
     // dispatch.
-    expect(telemetry.meter.createCounter).toHaveBeenCalledTimes(2);
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledTimes(2);
   });
 });
 

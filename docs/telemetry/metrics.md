@@ -12,6 +12,30 @@ All metrics use the `openclaw.*` namespace and are exported via OTLP at the conf
 
 With `collapseEphemeralSessions: true` (see [Configuration](../configuration.md)), the `gen_ai.conversation.id` label on `openclaw.llm.requests`, `.errors`, `.duration`, `.tokens.*`, and `.cost.usd`, on `gen_ai.client.token.usage` and `gen_ai.client.operation.duration`, and on `openclaw.tool.calls`, `openclaw.tool.duration`, and `openclaw.tool.approvals` — may be a collapsed, stable job-level value instead of the full per-run session key, for session keys matching one of the two recognized ephemeral shapes (see Configuration). Trace spans and log lines are unaffected and always carry the full per-run session key for drill-down. Default `false`: this label is the raw session key everywhere, same as before this option existed.
 
+#### `_by_model` metrics (opt-in)
+
+With `enableByModelMetrics: true` (see [Configuration](../configuration.md)), every per-conversation LLM metric gets an additional `_by_model` sibling: same value, same attributes, but with `gen_ai.conversation.id`/`gen_ai.agent.id` dropped so the series is rate-able even for a one-shot session (see [Limitations](../limitations.md) for the `rate()`/`increase()` blind spot this fixes). Default `false` — enabling it roughly **doubles** the number of LLM metric data points this plugin emits; if your metrics backend is a managed service billed by data volume or storage, check its pricing before enabling.
+
+This is the feature to reach for when you need a metric that's *reliably* rate-able, regardless of how often a session recurs. `collapseEphemeralSessions` can incidentally make a recurring-cron series rate-able too, once it's accumulated more than one sample across multiple runs — but that's a side effect of a dashboard-legibility feature, not guaranteed (a job that runs infrequently relative to `metricsIntervalMs`, or hasn't run twice yet, is still effectively one-shot even when collapsed). See [Limitations](../limitations.md) for the full comparison, including the one remaining gap in `enableByModelMetrics` itself (a `_by_model` series is still born flat on its very first sample per provider+model per gateway process lifetime).
+
+| Source metric | `_by_model` sibling |
+|---|---|
+| `openclaw.llm.requests` | `openclaw.llm.requests_by_model` |
+| `openclaw.llm.errors` | `openclaw.llm.errors_by_model` |
+| `openclaw.llm.duration` | `openclaw.llm.duration_by_model` |
+| `openclaw.llm.tokens.total` | `openclaw.llm.tokens.total_by_model` |
+| `openclaw.llm.tokens.prompt` | `openclaw.llm.tokens.prompt_by_model` |
+| `openclaw.llm.tokens.completion` | `openclaw.llm.tokens.completion_by_model` |
+| `openclaw.llm.tokens.system` | `openclaw.llm.tokens.system_by_model` |
+| `openclaw.llm.tokens.user` | `openclaw.llm.tokens.user_by_model` |
+| `openclaw.llm.tokens.tool_result` | `openclaw.llm.tokens.tool_result_by_model` |
+| `openclaw.llm.tokens.skill` | `openclaw.llm.tokens.skill_by_model` |
+| `openclaw.llm.cost.usd` | `openclaw.llm.cost.usd_by_model` |
+| `gen_ai.client.token.usage` (stable semconv) | `openclaw.genai.client.token.usage_by_model` |
+| `gen_ai.client.operation.duration` (stable semconv) | `openclaw.genai.client.operation.duration_by_model` |
+
+The two semconv-sourced siblings live in this plugin's own `openclaw.*` namespace rather than `gen_ai.client.*_by_model`, so the stable GenAI semconv names stay exactly spec-compliant. Tool metrics (`openclaw.tool.*`) have the same underlying blind spot but don't have a `_by_model` sibling yet.
+
 ### `openclaw.llm.requests`
 
 | | |
@@ -284,6 +308,12 @@ Track cost by monitoring `openclaw.llm.tokens.total` over time. In Dynatrace:
 
 ```
 timeseries avg(openclaw.llm.tokens.total), by:{gen_ai.request.model}
+```
+
+### Cost by Model Over Time (rate-able, including one-shot sessions — requires enableByModelMetrics: true)
+
+```
+sum by (gen_ai_response_model) (increase(openclaw_llm_cost_usd_by_model[$__rate_interval]))
 ```
 
 ### LLM Latency Percentiles

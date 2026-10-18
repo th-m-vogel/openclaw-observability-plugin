@@ -14,6 +14,7 @@ import { pathToFileURL } from "node:url";
 import type { TelemetryRuntime } from "./telemetry.js";
 import type { OtelObservabilityConfig } from "./config.js";
 import { resolveMetricConversationId } from "./metric-session-key.js";
+import { stripToModelTierAttrs } from "./metric-by-model.js";
 import {
   GEN_AI_AGENT_ID,
   GEN_AI_CONVERSATION_ID,
@@ -529,6 +530,41 @@ export async function registerDiagnosticsListener(
         counters.tokensTotal.add(usage.total, metricAttrs);
       }
 
+      if (config.enableByModelMetrics) {
+        const byModelAttrs = stripToModelTierAttrs(metricAttrs);
+        if (usage.input) {
+          counters.tokensPromptByModel.add(usage.input, byModelAttrs);
+          histograms.genAiTokenUsageByModel.record(usage.input, {
+            ...byModelAttrs,
+            [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
+          });
+        }
+        if (usage.output) {
+          counters.tokensCompletionByModel.add(usage.output, byModelAttrs);
+          histograms.genAiTokenUsageByModel.record(usage.output, {
+            ...byModelAttrs,
+            [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
+          });
+        }
+        if (usage.cacheRead) {
+          counters.tokensPromptByModel.add(usage.cacheRead, { ...byModelAttrs, "token.type": "cache_read" });
+          histograms.genAiTokenUsageByModel.record(usage.cacheRead, {
+            ...byModelAttrs,
+            [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
+          });
+        }
+        if (usage.cacheWrite) {
+          counters.tokensPromptByModel.add(usage.cacheWrite, { ...byModelAttrs, "token.type": "cache_write" });
+          histograms.genAiTokenUsageByModel.record(usage.cacheWrite, {
+            ...byModelAttrs,
+            [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
+          });
+        }
+        if (usage.total) {
+          counters.tokensTotalByModel.add(usage.total, byModelAttrs);
+        }
+      }
+
       logger.debug?.(
         `[otel] ${evt.type}: session=${sessionKey}, model=${model}, tokens=${usage.total ?? "?"}`
       );
@@ -616,10 +652,26 @@ export async function registerDiagnosticsListener(
 
       // Record cost metric
       if (typeof costUsd === "number" && costUsd > 0) {
-        telemetry.meter.createCounter("openclaw.llm.cost.usd", {
-          description: "Estimated LLM cost in USD",
-          unit: "usd",
-        }).add(costUsd, metricAttrs);
+        counters.costUsd.add(costUsd, metricAttrs);
+      }
+
+      if (config.enableByModelMetrics) {
+        const byModelAttrs = stripToModelTierAttrs(metricAttrs);
+        if (usage.system) {
+          counters.tokensSystemByModel.add(usage.system, byModelAttrs);
+        }
+        if (usage.user) {
+          counters.tokensUserByModel.add(usage.user, byModelAttrs);
+        }
+        if (usage.toolResult) {
+          counters.tokensToolResultByModel.add(usage.toolResult, byModelAttrs);
+        }
+        if (usage.skill) {
+          counters.tokensSkillByModel.add(usage.skill, byModelAttrs);
+        }
+        if (typeof costUsd === "number" && costUsd > 0) {
+          counters.costUsdByModel.add(costUsd, byModelAttrs);
+        }
       }
     } else {
       logger.debug?.(

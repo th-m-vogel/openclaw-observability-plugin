@@ -138,12 +138,22 @@ export interface OtelCounters {
   llmRequests: Counter;
   /** Total LLM errors */
   llmErrors: Counter;
+  /** Total LLM API requests, aggregated by provider+model (rate-able even for one-shot sessions) */
+  llmRequestsByModel: Counter;
+  /** Total LLM API errors, aggregated by provider+model (rate-able even for one-shot sessions) */
+  llmErrorsByModel: Counter;
   /** Total tokens (prompt + completion) */
   tokensTotal: Counter;
   /** Prompt tokens */
   tokensPrompt: Counter;
   /** Completion tokens */
   tokensCompletion: Counter;
+  /** Total tokens consumed (prompt + completion), aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensTotalByModel: Counter;
+  /** Prompt tokens consumed, aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensPromptByModel: Counter;
+  /** Completion tokens consumed, aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensCompletionByModel: Counter;
   /** Tool invocations */
   toolCalls: Counter;
   /** Tool errors */
@@ -196,6 +206,18 @@ export interface OtelCounters {
   tokensToolResult: Counter;
   /** Skill tokens */
   tokensSkill: Counter;
+  /** Estimated LLM cost in USD */
+  costUsd: Counter;
+  /** System prompt tokens, aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensSystemByModel: Counter;
+  /** User message tokens, aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensUserByModel: Counter;
+  /** Tool result tokens, aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensToolResultByModel: Counter;
+  /** Skill tokens, aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensSkillByModel: Counter;
+  /** Estimated LLM cost in USD, aggregated by provider+model (rate-able even for one-shot sessions) */
+  costUsdByModel: Counter;
   /** Webhook received events */
   webhooksReceived: Counter;
   /** Webhook processed events */
@@ -221,6 +243,12 @@ export interface OtelHistograms {
   genAiOperationDuration: Histogram;
   /** Stable GenAI client token usage (tokens); use with gen_ai.token.type attr. */
   genAiTokenUsage: Histogram;
+  /** Number of input/output tokens used, aggregated by provider+model (rate-able even for one-shot sessions); openclaw-namespaced sibling of the stable gen_ai.client.* semconv metric */
+  genAiTokenUsageByModel: Histogram;
+  /** LLM request duration, aggregated by provider+model (rate-able even for one-shot sessions) */
+  llmDurationByModel: Histogram;
+  /** GenAI operation duration, aggregated by provider+model (rate-able even for one-shot sessions); openclaw-namespaced sibling of the stable gen_ai.client.* semconv metric */
+  genAiOperationDurationByModel: Histogram;
   /** Cron execution duration in ms */
   cronDuration: Histogram;
   /** Sub-agent duration in ms */
@@ -464,6 +492,14 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Total LLM API errors",
       unit: "errors",
     }),
+    llmRequestsByModel: meter.createCounter("openclaw.llm.requests_by_model", {
+      description: "Total LLM API requests, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "requests",
+    }),
+    llmErrorsByModel: meter.createCounter("openclaw.llm.errors_by_model", {
+      description: "Total LLM API errors, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "errors",
+    }),
     tokensTotal: meter.createCounter("openclaw.llm.tokens.total", {
       description: "Total tokens consumed (prompt + completion)",
       unit: "tokens",
@@ -474,6 +510,18 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     }),
     tokensCompletion: meter.createCounter("openclaw.llm.tokens.completion", {
       description: "Completion tokens consumed",
+      unit: "tokens",
+    }),
+    tokensTotalByModel: meter.createCounter("openclaw.llm.tokens.total_by_model", {
+      description: "Total tokens consumed (prompt + completion), aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
+    tokensPromptByModel: meter.createCounter("openclaw.llm.tokens.prompt_by_model", {
+      description: "Prompt tokens consumed, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
+    tokensCompletionByModel: meter.createCounter("openclaw.llm.tokens.completion_by_model", {
+      description: "Completion tokens consumed, aggregated by provider+model (rate-able even for one-shot sessions)",
       unit: "tokens",
     }),
     toolCalls: meter.createCounter("openclaw.tool.calls", {
@@ -585,6 +633,30 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Skill tokens",
       unit: "tokens",
     }),
+    costUsd: meter.createCounter("openclaw.llm.cost.usd", {
+      description: "Estimated LLM cost in USD",
+      unit: "usd",
+    }),
+    tokensSystemByModel: meter.createCounter("openclaw.llm.tokens.system_by_model", {
+      description: "System prompt tokens, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
+    tokensUserByModel: meter.createCounter("openclaw.llm.tokens.user_by_model", {
+      description: "User message tokens, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
+    tokensToolResultByModel: meter.createCounter("openclaw.llm.tokens.tool_result_by_model", {
+      description: "Tool result tokens, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
+    tokensSkillByModel: meter.createCounter("openclaw.llm.tokens.skill_by_model", {
+      description: "Skill tokens, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
+    costUsdByModel: meter.createCounter("openclaw.llm.cost.usd_by_model", {
+      description: "Estimated LLM cost in USD, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "usd",
+    }),
     // Webhook metrics (ISI-1020)
     webhooksReceived: meter.createCounter("openclaw.webhooks.received", {
       description: "Total webhook received events",
@@ -632,6 +704,18 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     genAiTokenUsage: meter.createHistogram(METRIC_TOKEN_USAGE, {
       description: "Number of input and output tokens used (stable semconv)",
       unit: "{token}",
+    }),
+    genAiTokenUsageByModel: meter.createHistogram("openclaw.genai.client.token.usage_by_model", {
+      description: "Number of input and output tokens used, aggregated by provider+model (rate-able even for one-shot sessions); openclaw-namespaced sibling of the stable gen_ai.client.* semconv metric",
+      unit: "{token}",
+    }),
+    llmDurationByModel: meter.createHistogram("openclaw.llm.duration_by_model", {
+      description: "LLM request duration, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "ms",
+    }),
+    genAiOperationDurationByModel: meter.createHistogram("openclaw.genai.client.operation.duration_by_model", {
+      description: "GenAI operation duration, aggregated by provider+model (rate-able even for one-shot sessions); openclaw-namespaced sibling of the stable gen_ai.client.* semconv metric",
+      unit: "s",
     }),
     cronDuration: meter.createHistogram("openclaw.cron.duration", {
       description: "Cron execution duration",
