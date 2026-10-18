@@ -28,6 +28,9 @@ All releases live on `main`; there is no legacy-version branch split to track. U
 
 Only this fork's own work is listed here — see [`CHANGELOG.md`](CHANGELOG.md) for full detail on every entry, including upstream's pre-fork history.
 
+**`0.12.0-dev`:**
+- New opt-in `collapseEphemeralSessions` config flag: collapses ephemeral per-run session-key shapes (recurring cron jobs, internal-session-effect turns) to a stable, job-level identifier on metric labels only — fixes `rate()`/`increase()` queries that otherwise read zero forever on a one-shot session, without touching trace spans or log lines, which always keep the full per-run session key. Default `false`, fully backward-compatible with existing dashboards. See [`docs/telemetry/metrics.md`](docs/telemetry/metrics.md) and [`docs/configuration.md`](docs/configuration.md).
+
 **`0.11.0`:**
 - Real per-call token metrics (`openclaw.llm.requests`/`.duration`/`.tokens.*`), from a real per-model-call diagnostic event instead of once per agent turn.
 - Root-caused and fixed [`openclaw/openclaw#166289`](https://github.com/openclaw/openclaw/issues/166289) — a core mechanism (a second, independent plugin module instance loaded during an internal read-only pass) could duplicate `model.usage` dispatch, double-counting cost/tokens. Replaced an argv-based CLI-command guess with an authoritative check on `api.registrationMode`, closing both this and a related one-shot-CLI-hang issue in the same change.
