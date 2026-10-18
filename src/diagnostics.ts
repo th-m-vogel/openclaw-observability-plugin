@@ -654,6 +654,25 @@ export async function registerDiagnosticsListener(
       if (typeof costUsd === "number" && costUsd > 0) {
         counters.costUsd.add(costUsd, metricAttrs);
       }
+
+      if (config.enableByModelMetrics) {
+        const byModelAttrs = stripToModelTierAttrs(metricAttrs);
+        if (usage.system) {
+          counters.tokensSystemByModel.add(usage.system, byModelAttrs);
+        }
+        if (usage.user) {
+          counters.tokensUserByModel.add(usage.user, byModelAttrs);
+        }
+        if (usage.toolResult) {
+          counters.tokensToolResultByModel.add(usage.toolResult, byModelAttrs);
+        }
+        if (usage.skill) {
+          counters.tokensSkillByModel.add(usage.skill, byModelAttrs);
+        }
+        if (typeof costUsd === "number" && costUsd > 0) {
+          counters.costUsdByModel.add(costUsd, byModelAttrs);
+        }
+      }
     } else {
       logger.debug?.(
         `[otel] model.usage: suppressed duplicate dispatch (openclaw/openclaw#166289) for session=${sessionKey}, cost=$${costUsd?.toFixed(4) || "?"}, tokens=${usage.total || "?"}`

@@ -208,6 +208,16 @@ export interface OtelCounters {
   tokensSkill: Counter;
   /** Estimated LLM cost in USD */
   costUsd: Counter;
+  /** System prompt tokens, aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensSystemByModel: Counter;
+  /** User message tokens, aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensUserByModel: Counter;
+  /** Tool result tokens, aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensToolResultByModel: Counter;
+  /** Skill tokens, aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensSkillByModel: Counter;
+  /** Estimated LLM cost in USD, aggregated by provider+model (rate-able even for one-shot sessions) */
+  costUsdByModel: Counter;
   /** Webhook received events */
   webhooksReceived: Counter;
   /** Webhook processed events */
@@ -625,6 +635,26 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     }),
     costUsd: meter.createCounter("openclaw.llm.cost.usd", {
       description: "Estimated LLM cost in USD",
+      unit: "usd",
+    }),
+    tokensSystemByModel: meter.createCounter("openclaw.llm.tokens.system_by_model", {
+      description: "System prompt tokens, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
+    tokensUserByModel: meter.createCounter("openclaw.llm.tokens.user_by_model", {
+      description: "User message tokens, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
+    tokensToolResultByModel: meter.createCounter("openclaw.llm.tokens.tool_result_by_model", {
+      description: "Tool result tokens, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
+    tokensSkillByModel: meter.createCounter("openclaw.llm.tokens.skill_by_model", {
+      description: "Skill tokens, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
+    costUsdByModel: meter.createCounter("openclaw.llm.cost.usd_by_model", {
+      description: "Estimated LLM cost in USD, aggregated by provider+model (rate-able even for one-shot sessions)",
       unit: "usd",
     }),
     // Webhook metrics (ISI-1020)

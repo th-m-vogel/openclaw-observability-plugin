@@ -56,6 +56,11 @@ function createTelemetry() {
       tokensTotalByModel: createCounter(),
       tokensPromptByModel: createCounter(),
       tokensCompletionByModel: createCounter(),
+      tokensSystemByModel: createCounter(),
+      tokensUserByModel: createCounter(),
+      tokensToolResultByModel: createCounter(),
+      tokensSkillByModel: createCounter(),
+      costUsdByModel: createCounter(),
     },
     histograms: {
       genAiOperationDuration: createHistogram(),
@@ -542,6 +547,118 @@ describe("model.call.completed / model.call.error diagnostic events", () => {
     expect(telemetry.counters.tokensPromptByModel.add).not.toHaveBeenCalled();
     expect(telemetry.counters.tokensCompletionByModel.add).not.toHaveBeenCalled();
     expect(telemetry.counters.tokensTotalByModel.add).not.toHaveBeenCalled();
+  });
+});
+
+describe("model.usage _by_model siblings for the token breakdown and cost", () => {
+  it("also records _by_model siblings when enableByModelMetrics is on, without conversation id", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.usage",
+          sessionKey: "agent:main:new",
+          provider: "anthropic",
+          model: "claude-3.5-sonnet",
+          usage: { system: 100, user: 200, toolResult: 50, skill: 25, total: 375 },
+          costUsd: 0.05,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(
+      path.join(root, "openclaw.mjs"),
+      createLogger(),
+      telemetry,
+      { collapseEphemeralSessions: false, enableByModelMetrics: true },
+    );
+
+    const byModelAttrs = {
+      "gen_ai.response.model": "claude-3.5-sonnet",
+      "gen_ai.operation.name": "invoke_agent",
+      "gen_ai.provider.name": "anthropic",
+      "openclaw.provider": "anthropic",
+    };
+    expect(telemetry.counters.tokensSystemByModel.add).toHaveBeenCalledWith(100, byModelAttrs);
+    expect(telemetry.counters.tokensUserByModel.add).toHaveBeenCalledWith(200, byModelAttrs);
+    expect(telemetry.counters.tokensToolResultByModel.add).toHaveBeenCalledWith(50, byModelAttrs);
+    expect(telemetry.counters.tokensSkillByModel.add).toHaveBeenCalledWith(25, byModelAttrs);
+    expect(telemetry.counters.costUsdByModel.add).toHaveBeenCalledWith(0.05, byModelAttrs);
+  });
+
+  it("does not record a _by_model increment for a falsy token-breakdown field", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.usage", sessionKey: "agent:main:new", provider: "anthropic",
+          model: "claude-3.5-sonnet", usage: { system: 100, toolResult: 0 }, costUsd: 0,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(
+      path.join(root, "openclaw.mjs"),
+      createLogger(),
+      telemetry,
+      { collapseEphemeralSessions: false, enableByModelMetrics: true },
+    );
+
+    expect(telemetry.counters.tokensToolResultByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.costUsdByModel.add).not.toHaveBeenCalled();
+  });
+
+  it("suppresses the _by_model siblings too on a duplicate dispatch, not just the raw metrics", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        const payload = {
+          type: "model.usage", sessionKey: "agent:main:new", provider: "anthropic",
+          model: "claude-3.5-sonnet", usage: { system: 100, total: 100 }, costUsd: 0.05,
+        };
+        listener(payload);
+        listener({ ...payload });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(
+      path.join(root, "openclaw.mjs"),
+      createLogger(),
+      telemetry,
+      { collapseEphemeralSessions: false, enableByModelMetrics: true },
+    );
+
+    expect(telemetry.counters.tokensSystemByModel.add).toHaveBeenCalledTimes(1);
+    expect(telemetry.counters.costUsdByModel.add).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT record any _by_model sibling when enableByModelMetrics is off (default)", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.usage", sessionKey: "agent:main:new", provider: "anthropic",
+          model: "claude-3.5-sonnet", usage: { system: 100, total: 100 }, costUsd: 0.05,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.tokensSystemByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.costUsdByModel.add).not.toHaveBeenCalled();
   });
 });
 
