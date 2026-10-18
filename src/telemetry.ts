@@ -148,6 +148,12 @@ export interface OtelCounters {
   tokensPrompt: Counter;
   /** Completion tokens */
   tokensCompletion: Counter;
+  /** Total tokens consumed (prompt + completion), aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensTotalByModel: Counter;
+  /** Prompt tokens consumed, aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensPromptByModel: Counter;
+  /** Completion tokens consumed, aggregated by provider+model (rate-able even for one-shot sessions) */
+  tokensCompletionByModel: Counter;
   /** Tool invocations */
   toolCalls: Counter;
   /** Tool errors */
@@ -227,6 +233,8 @@ export interface OtelHistograms {
   genAiOperationDuration: Histogram;
   /** Stable GenAI client token usage (tokens); use with gen_ai.token.type attr. */
   genAiTokenUsage: Histogram;
+  /** Number of input/output tokens used, aggregated by provider+model (rate-able even for one-shot sessions); openclaw-namespaced sibling of the stable gen_ai.client.* semconv metric */
+  genAiTokenUsageByModel: Histogram;
   /** LLM request duration, aggregated by provider+model (rate-able even for one-shot sessions) */
   llmDurationByModel: Histogram;
   /** GenAI operation duration, aggregated by provider+model (rate-able even for one-shot sessions); openclaw-namespaced sibling of the stable gen_ai.client.* semconv metric */
@@ -494,6 +502,18 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Completion tokens consumed",
       unit: "tokens",
     }),
+    tokensTotalByModel: meter.createCounter("openclaw.llm.tokens.total_by_model", {
+      description: "Total tokens consumed (prompt + completion), aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
+    tokensPromptByModel: meter.createCounter("openclaw.llm.tokens.prompt_by_model", {
+      description: "Prompt tokens consumed, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
+    tokensCompletionByModel: meter.createCounter("openclaw.llm.tokens.completion_by_model", {
+      description: "Completion tokens consumed, aggregated by provider+model (rate-able even for one-shot sessions)",
+      unit: "tokens",
+    }),
     toolCalls: meter.createCounter("openclaw.tool.calls", {
       description: "Total tool invocations",
       unit: "calls",
@@ -653,6 +673,10 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     }),
     genAiTokenUsage: meter.createHistogram(METRIC_TOKEN_USAGE, {
       description: "Number of input and output tokens used (stable semconv)",
+      unit: "{token}",
+    }),
+    genAiTokenUsageByModel: meter.createHistogram("openclaw.genai.client.token.usage_by_model", {
+      description: "Number of input and output tokens used, aggregated by provider+model (rate-able even for one-shot sessions); openclaw-namespaced sibling of the stable gen_ai.client.* semconv metric",
       unit: "{token}",
     }),
     llmDurationByModel: meter.createHistogram("openclaw.llm.duration_by_model", {

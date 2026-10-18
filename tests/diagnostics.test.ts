@@ -53,11 +53,15 @@ function createTelemetry() {
       tokensToolResult: createCounter(),
       tokensTotal: createCounter(),
       tokensUser: createCounter(),
+      tokensTotalByModel: createCounter(),
+      tokensPromptByModel: createCounter(),
+      tokensCompletionByModel: createCounter(),
     },
     histograms: {
       genAiOperationDuration: createHistogram(),
       genAiTokenUsage: createHistogram(),
       llmDuration: createHistogram(),
+      genAiTokenUsageByModel: createHistogram(),
     },
     meter: {
       createCounter: vi.fn(() => createCounter()),
@@ -84,7 +88,7 @@ async function registerWithEntry(
   entryFile: string,
   logger = createLogger(),
   telemetry = createTelemetry(),
-  config: unknown = { collapseEphemeralSessions: false },
+  config: unknown = { collapseEphemeralSessions: false, enableByModelMetrics: false },
 ) {
   const diagnostics = await loadFreshDiagnostics();
   const unsubscribe = await withArgvEntry(entryFile, () =>
@@ -417,6 +421,80 @@ describe("model.call.completed / model.call.error diagnostic events", () => {
     );
   });
 
+  it("also records _by_model siblings for the per-call token metrics when enableByModelMetrics is on, without conversation id or agent id", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.call.completed",
+          sessionKey: "agent:main:new",
+          provider: "openai-compatible",
+          model: "example/model-1",
+          agentId: "main",
+          usage: { input: 1000, output: 200, cacheRead: 500, cacheWrite: 50, total: 1250 },
+          durationMs: 850,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(
+      path.join(root, "openclaw.mjs"),
+      createLogger(),
+      telemetry,
+      { collapseEphemeralSessions: false, enableByModelMetrics: true },
+    );
+
+    const byModelAttrs = {
+      "gen_ai.response.model": "example/model-1",
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": "openai-compatible",
+      "openclaw.provider": "openai-compatible",
+    };
+    expect(telemetry.counters.tokensPromptByModel.add).toHaveBeenCalledWith(1000, byModelAttrs);
+    expect(telemetry.counters.tokensCompletionByModel.add).toHaveBeenCalledWith(200, byModelAttrs);
+    expect(telemetry.counters.tokensPromptByModel.add).toHaveBeenCalledWith(
+      500,
+      { ...byModelAttrs, "token.type": "cache_read" },
+    );
+    expect(telemetry.counters.tokensPromptByModel.add).toHaveBeenCalledWith(
+      50,
+      { ...byModelAttrs, "token.type": "cache_write" },
+    );
+    expect(telemetry.counters.tokensTotalByModel.add).toHaveBeenCalledWith(1250, byModelAttrs);
+    expect(telemetry.histograms.genAiTokenUsageByModel.record).toHaveBeenCalledWith(
+      1000,
+      expect.objectContaining({ ...byModelAttrs, "gen_ai.token.type": "input" }),
+    );
+  });
+
+  it("does NOT record any _by_model sibling for the per-call token metrics when enableByModelMetrics is off (default)", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.call.completed",
+          sessionKey: "agent:main:new",
+          provider: "openai-compatible",
+          model: "example/model-1",
+          usage: { input: 1000, output: 200, total: 1200 },
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.tokensPromptByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensCompletionByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensTotalByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.histograms.genAiTokenUsageByModel.record).not.toHaveBeenCalled();
+  });
+
   it("records tokens from a model.call.error event when usage is present (provider billed tokens before erroring)", async () => {
     const root = makeInstallRoot();
     writeChunk(
@@ -461,6 +539,9 @@ describe("model.call.completed / model.call.error diagnostic events", () => {
     expect(telemetry.counters.tokensPrompt.add).not.toHaveBeenCalled();
     expect(telemetry.counters.tokensCompletion.add).not.toHaveBeenCalled();
     expect(telemetry.counters.tokensTotal.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensPromptByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensCompletionByModel.add).not.toHaveBeenCalled();
+    expect(telemetry.counters.tokensTotalByModel.add).not.toHaveBeenCalled();
   });
 });
 
