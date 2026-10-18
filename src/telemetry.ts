@@ -196,6 +196,8 @@ export interface OtelCounters {
   tokensToolResult: Counter;
   /** Skill tokens */
   tokensSkill: Counter;
+  /** Estimated LLM cost in USD */
+  costUsd: Counter;
   /** Webhook received events */
   webhooksReceived: Counter;
   /** Webhook processed events */
@@ -584,6 +586,10 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     tokensSkill: meter.createCounter("openclaw.llm.tokens.skill", {
       description: "Skill tokens",
       unit: "tokens",
+    }),
+    costUsd: meter.createCounter("openclaw.llm.cost.usd", {
+      description: "Estimated LLM cost in USD",
+      unit: "usd",
     }),
     // Webhook metrics (ISI-1020)
     webhooksReceived: meter.createCounter("openclaw.webhooks.received", {

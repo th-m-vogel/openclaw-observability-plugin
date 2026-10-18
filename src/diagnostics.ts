@@ -616,10 +616,7 @@ export async function registerDiagnosticsListener(
 
       // Record cost metric
       if (typeof costUsd === "number" && costUsd > 0) {
-        telemetry.meter.createCounter("openclaw.llm.cost.usd", {
-          description: "Estimated LLM cost in USD",
-          unit: "usd",
-        }).add(costUsd, metricAttrs);
+        counters.costUsd.add(costUsd, metricAttrs);
       }
     } else {
       logger.debug?.(

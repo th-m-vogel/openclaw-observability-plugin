@@ -44,6 +44,7 @@ function createHistogram() {
 function createTelemetry() {
   return {
     counters: {
+      costUsd: createCounter(),
       llmRequests: createCounter(),
       tokensCompletion: createCounter(),
       tokensPrompt: createCounter(),
@@ -234,10 +235,7 @@ describe("internal diagnostics export resolution", () => {
     expect(telemetry.counters.llmRequests.add).not.toHaveBeenCalled();
     expect(telemetry.histograms.llmDuration.record).not.toHaveBeenCalled();
     expect(telemetry.histograms.genAiOperationDuration.record).not.toHaveBeenCalled();
-    expect(telemetry.meter.createCounter).toHaveBeenCalledWith(
-      "openclaw.llm.cost.usd",
-      expect.any(Object),
-    );
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledWith(0.12, expect.any(Object));
   });
 
   it("suppresses an exact-duplicate model.usage dispatch (openclaw/openclaw#166289) so cost isn't double-counted", async () => {
@@ -265,10 +263,9 @@ describe("internal diagnostics export resolution", () => {
     await registerWithEntry(path.join(root, "openclaw.mjs"), logger, telemetry);
 
     // Cost is only recorded once, even though the event fired twice.
-    const costCounter = telemetry.meter.createCounter.mock.results[0]?.value;
-    expect(telemetry.meter.createCounter).toHaveBeenCalledTimes(1);
-    expect(costCounter.add).toHaveBeenCalledTimes(1);
-    expect(costCounter.add).toHaveBeenCalledWith(0.1666, expect.any(Object));
+    expect(telemetry.meter.createCounter).not.toHaveBeenCalled();
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledTimes(1);
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledWith(0.1666, expect.any(Object));
 
     // The second, duplicate dispatch is logged, not silently dropped.
     expect(logger.debug).toHaveBeenCalledWith(
@@ -297,8 +294,7 @@ describe("internal diagnostics export resolution", () => {
 
     await registerWithEntry(path.join(root, "openclaw.mjs"), logger, telemetry);
 
-    const costCounter = telemetry.meter.createCounter.mock.results[0]?.value;
-    expect(costCounter.add).toHaveBeenCalledTimes(1);
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledTimes(1);
     expect(logger.debug).toHaveBeenCalledWith(
       expect.stringContaining("suppressed duplicate dispatch"),
     );
@@ -324,7 +320,7 @@ describe("internal diagnostics export resolution", () => {
 
     await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
 
-    expect(telemetry.meter.createCounter).toHaveBeenCalledTimes(2);
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledTimes(2);
   });
 
   it("survives a malformed event (non-numeric costUsd) without crashing, logging it instead of throwing into core's dispatcher", async () => {
@@ -352,8 +348,7 @@ describe("internal diagnostics export resolution", () => {
 
     // Did not throw (registerWithEntry itself would have rejected), and
     // the well-formed event right after still landed normally.
-    const costCounter = telemetry.meter.createCounter.mock.results[0]?.value;
-    expect(costCounter.add).toHaveBeenCalledWith(0.05, expect.any(Object));
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledWith(0.05, expect.any(Object));
   });
 
   it("ignores non-function direct exports", async () => {
@@ -557,8 +552,7 @@ describe("collapseEphemeralSessions (metric labels only)", () => {
       { collapseEphemeralSessions: true },
     );
 
-    const costCounter = telemetry.meter.createCounter.mock.results[0]?.value;
-    expect(costCounter.add).toHaveBeenCalledWith(
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledWith(
       0.05,
       expect.objectContaining({ "gen_ai.conversation.id": collapsedEffectsKey }),
     );
@@ -595,7 +589,7 @@ describe("collapseEphemeralSessions (metric labels only)", () => {
     // recorded — the dedup guard must key on the raw sessionKey, not the
     // collapsed one, or these would wrongly look like the same duplicate
     // dispatch.
-    expect(telemetry.meter.createCounter).toHaveBeenCalledTimes(2);
+    expect(telemetry.counters.costUsd.add).toHaveBeenCalledTimes(2);
   });
 });
 
