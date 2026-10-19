@@ -13,6 +13,15 @@
  * `_` is eligible. A UUID elsewhere in the key (a cron job's own stable
  * ID, a channel/user ID) is never touched, since it may be the thing a
  * dashboard actually needs to group by.
+ *
+ * `internal-session-effects:` session keys (e.g. `skill-workshop-review`)
+ * are a special case: real per-run IDs observed live aren't always
+ * standard 8-4-4-4-12 UUIDs (some have 6 dash-separated hex groups, not
+ * 5), so for session keys carrying this literal marker, any trailing
+ * `_<opaque-id>` made up only of hex digits and dashes collapses too —
+ * not just a strict UUID shape. Scoped to the marker specifically so it
+ * can't misfire on an unrelated session key that happens to end in a
+ * hex-and-dash-shaped token.
  */
 
 import type { OtelObservabilityConfig } from "./config.js";
@@ -20,6 +29,16 @@ import type { OtelObservabilityConfig } from "./config.js";
 const UUID_SHAPE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const TRAILING_RUN_SUFFIX = new RegExp(`:run:${UUID_SHAPE}$`, "i");
 const TRAILING_UNDERSCORE_SUFFIX = new RegExp(`_${UUID_SHAPE}$`, "i");
+
+// `internal-session-effects:` IDs observed live (e.g. skill-workshop-review)
+// aren't always standard 8-4-4-4-12 UUIDs — real examples have 6 dash-
+// separated hex groups, not 5. Rather than guess at core's exact ID scheme,
+// this accepts any trailing opaque token made up only of hex digits and
+// dashes, scoped strictly to session keys carrying the literal
+// `internal-session-effects:` marker so it can't misfire on an unrelated
+// session key that happens to end in a hex-and-dash-shaped token.
+const INTERNAL_SESSION_EFFECTS_MARKER = "internal-session-effects:";
+const TRAILING_HEX_DASH_SUFFIX = /_[0-9a-f](?:[0-9a-f-]*[0-9a-f])?$/i;
 
 /**
  * Pure matching/stripping logic — no config awareness. Exported mainly so
@@ -34,6 +53,13 @@ export function collapseEphemeralSessionKey(sessionKey: string): string {
   const underscoreMatch = sessionKey.match(TRAILING_UNDERSCORE_SUFFIX);
   if (underscoreMatch) {
     return sessionKey.slice(0, underscoreMatch.index);
+  }
+
+  if (sessionKey.includes(INTERNAL_SESSION_EFFECTS_MARKER)) {
+    const hexDashMatch = sessionKey.match(TRAILING_HEX_DASH_SUFFIX);
+    if (hexDashMatch) {
+      return sessionKey.slice(0, hexDashMatch.index);
+    }
   }
 
   return sessionKey;
