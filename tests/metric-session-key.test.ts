@@ -67,6 +67,18 @@ describe("collapseEphemeralSessionKey", () => {
     expect(collapseEphemeralSessionKey(key)).toBe(key);
   });
 
+  it("strips a bare opaque id with no label directly after internal-session-effects:, a real shape observed in production", () => {
+    // Real examples seen live: some internal-session-effects jobs have no
+    // human-readable label at all before the per-run id (unlike
+    // skill-workshop-review_<id>), so there's no leading `_` for the
+    // existing hex+dash rule to anchor on.
+    expect(
+      collapseEphemeralSessionKey(
+        "agent:main:internal-session-effects:55d1aba4-57f5-4983-8388-8c9cbf2dd7c9-da3b886ec4001009",
+      ),
+    ).toBe("agent:main:internal-session-effects");
+  });
+
   it("passes through the 'unknown' placeholder session key unchanged", () => {
     expect(collapseEphemeralSessionKey("unknown")).toBe("unknown");
   });
