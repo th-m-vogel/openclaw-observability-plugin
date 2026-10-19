@@ -49,6 +49,24 @@ describe("collapseEphemeralSessionKey", () => {
     expect(collapseEphemeralSessionKey(key)).toBe(key);
   });
 
+  it("strips a non-UUID-shaped (hex+dash) opaque id after internal-session-effects:, a real shape observed in production", () => {
+    // Real example seen live: OpenClaw's skill-workshop-review internal
+    // session-effect IDs aren't standard 8-4-4-4-12 UUIDs (6 dash-separated
+    // groups here, not 5), so the strict UUID matcher above never catches
+    // them even though this is exactly the shape collapseEphemeralSessions
+    // was built to cover (see module doc comment).
+    expect(
+      collapseEphemeralSessionKey(
+        "agent:main:internal-session-effects:skill-workshop-review_f54ebfff-d4e5-4969-8c27-87-35c6acc9e5a6bf79",
+      ),
+    ).toBe("agent:main:internal-session-effects:skill-workshop-review");
+  });
+
+  it("does NOT apply the loose hex+dash opaque-id rule outside internal-session-effects: sessions", () => {
+    const key = "agent:main:channel:f54ebfff-d4e5-4969-8c27-87-35c6acc9e5a6bf79";
+    expect(collapseEphemeralSessionKey(key)).toBe(key);
+  });
+
   it("passes through the 'unknown' placeholder session key unchanged", () => {
     expect(collapseEphemeralSessionKey("unknown")).toBe("unknown");
   });
