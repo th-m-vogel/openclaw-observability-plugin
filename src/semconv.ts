@@ -119,7 +119,7 @@ export const ATTR_USER_ID = "user.id";
  * — the schema URL on the Resource is what tells downstream backends
  * which generation of OTel attribute names this plugin emits.
  */
-export const OTEL_SCHEMA_URL = "https://opentelemetry.io/schemas/1.39.0";
+export const OTEL_SCHEMA_URL = "https://opentelemetry.io/schemas/1.43.0";
 
 // ── Plugin-domain (legacy) attribute keys ───────────────────────────
 export const OC_AGENT_ID = "openclaw.agent.id";
