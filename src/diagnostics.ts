@@ -475,6 +475,24 @@ export async function registerDiagnosticsListener(
       return;
     }
 
+    // Model/provider failover (core's `model.failover` trusted diagnostic
+    // event — same general dispatch channel as `model.usage`). Attribute
+    // names mirror core's own `openclaw.model.failover` metric exactly
+    // (see docs/gateway/opentelemetry/model-calls-and-metrics).
+    if (evt.type === "model.failover") {
+      const failoverAttrs: Record<string, string> = {};
+      if (evt.fromProvider) failoverAttrs["openclaw.provider"] = evt.fromProvider;
+      if (evt.fromModel) failoverAttrs["openclaw.model"] = evt.fromModel;
+      if (evt.toProvider) failoverAttrs["openclaw.failover.to_provider"] = evt.toProvider;
+      if (evt.toModel) failoverAttrs["openclaw.failover.to_model"] = evt.toModel;
+      if (evt.reason) failoverAttrs["openclaw.failover.reason"] = evt.reason;
+      if (typeof evt.suspended === "boolean") failoverAttrs["openclaw.failover.suspended"] = String(evt.suspended);
+      if (evt.lane) failoverAttrs["openclaw.lane"] = evt.lane;
+      counters.modelFailover.add(1, failoverAttrs);
+      logger.debug?.(`[otel] model.failover: ${evt.fromProvider}/${evt.fromModel} -> ${evt.toProvider}/${evt.toModel}, reason=${evt.reason}`);
+      return;
+    }
+
     // 0.12.0+: real per-call token usage. Unlike `model_call_started`/
     // `model_call_ended` (the plugin *hooks*, confirmed to carry no usage
     // field — see hooks.ts), these are `onInternalDiagnosticEvent`

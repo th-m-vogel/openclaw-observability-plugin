@@ -54,6 +54,7 @@ function createTelemetry() {
       tokensCompletionByModel: createCounter(),
       costUsdByModel: createCounter(),
       skillUsed: createCounter(),
+      modelFailover: createCounter(),
     },
     histograms: {
       genAiOperationDuration: createHistogram(),
@@ -702,6 +703,64 @@ describe("skill.used diagnostic event", () => {
       "openclaw.skill.name": "brainstorming",
       "openclaw.skill.source": "workspace",
       "openclaw.skill.activation": "read",
+    });
+  });
+});
+
+describe("model.failover diagnostic event", () => {
+  it("records a failover with all optional fields present", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.failover",
+          sessionKey: "agent:main:new",
+          lane: "main",
+          fromProvider: "anthropic",
+          fromModel: "claude-sonnet-5",
+          toProvider: "openai",
+          toModel: "gpt-5.6-luna",
+          reason: "upstream_error",
+          suspended: true,
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.modelFailover.add).toHaveBeenCalledWith(1, {
+      "openclaw.provider": "anthropic",
+      "openclaw.model": "claude-sonnet-5",
+      "openclaw.failover.to_provider": "openai",
+      "openclaw.failover.to_model": "gpt-5.6-luna",
+      "openclaw.failover.reason": "upstream_error",
+      "openclaw.failover.suspended": "true",
+      "openclaw.lane": "main",
+    });
+  });
+
+  it("omits attributes for fields not present on the event", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "model.failover",
+          sessionKey: "agent:main:new",
+          reason: "rate_limited",
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.modelFailover.add).toHaveBeenCalledWith(1, {
+      "openclaw.failover.reason": "rate_limited",
     });
   });
 });
