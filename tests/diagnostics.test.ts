@@ -55,6 +55,7 @@ function createTelemetry() {
       costUsdByModel: createCounter(),
       skillUsed: createCounter(),
       modelFailover: createCounter(),
+      toolLoop: createCounter(),
     },
     histograms: {
       genAiOperationDuration: createHistogram(),
@@ -761,6 +762,73 @@ describe("model.failover diagnostic event", () => {
 
     expect(telemetry.counters.modelFailover.add).toHaveBeenCalledWith(1, {
       "openclaw.failover.reason": "rate_limited",
+    });
+  });
+});
+
+describe("tool.loop diagnostic event", () => {
+  it("records a detected tool-call loop with a paired tool present", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "tool.loop",
+          sessionKey: "agent:main:new",
+          agentId: "main",
+          toolName: "Read",
+          level: "critical",
+          action: "block",
+          detector: "ping_pong",
+          count: 12,
+          message: "repetitive Read/Write ping-pong detected",
+          pairedToolName: "Write",
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.toolLoop.add).toHaveBeenCalledWith(1, {
+      "openclaw.toolName": "Read",
+      "openclaw.loop.level": "critical",
+      "openclaw.loop.action": "block",
+      "openclaw.loop.detector": "ping_pong",
+      "openclaw.loop.count": "12",
+      "openclaw.loop.paired_tool": "Write",
+    });
+  });
+
+  it("omits the paired_tool attribute when the event has no pairedToolName", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "tool.loop",
+          sessionKey: "agent:main:new",
+          toolName: "web_fetch",
+          level: "warning",
+          action: "warn",
+          detector: "generic_repeat",
+          count: 4,
+          message: "repetitive web_fetch calls detected",
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.toolLoop.add).toHaveBeenCalledWith(1, {
+      "openclaw.toolName": "web_fetch",
+      "openclaw.loop.level": "warning",
+      "openclaw.loop.action": "warn",
+      "openclaw.loop.detector": "generic_repeat",
+      "openclaw.loop.count": "4",
     });
   });
 });
