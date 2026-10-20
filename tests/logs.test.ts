@@ -19,8 +19,16 @@ vi.mock("@opentelemetry/exporter-logs-otlp-http", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opentelemetry/exporter-logs-otlp-http")>();
   return { ...actual, OTLPLogExporter: vi.fn((opts: any) => new actual.OTLPLogExporter(opts)) };
 });
+// Same wrap-not-replace pattern for the gRPC log exporter — regression
+// coverage for the headers→metadata conversion.
+vi.mock("@opentelemetry/exporter-logs-otlp-grpc", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opentelemetry/exporter-logs-otlp-grpc")>();
+  return { ...actual, OTLPLogExporter: vi.fn((opts: any) => new actual.OTLPLogExporter(opts)) };
+});
 
+import { Metadata } from "@grpc/grpc-js";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { OTLPLogExporter as OTLPLogExporterGRPC } from "@opentelemetry/exporter-logs-otlp-grpc";
 import {
   bridgeGatewayLogger,
   buildLogAttributes,
@@ -76,6 +84,44 @@ describe("log pipeline initialization (ISI-930)", () => {
     expect(logger.info).toHaveBeenCalledWith(
       "[otel-logs] Log export disabled in config"
     );
+  });
+
+  it("actually delivers a buffered log record to the real exporter on flush (regression: BatchLogRecordProcessor constructor shape)", async () => {
+    // @opentelemetry/sdk-logs changed BatchLogRecordProcessor from a
+    // two-argument (exporter, options) constructor to a single options
+    // object with `exporter` as a property. Calling it the old way doesn't
+    // throw or fail type-check at runtime (vitest doesn't type-check) — it
+    // silently sets up a processor whose `_exporter` is undefined, so every
+    // flush is a silent no-op. Only a real flush-through-to-the-exporter
+    // test catches this; config/endpoint assertions alone cannot.
+    // `OTLPLogExporter` as imported above is the vi.mock wrapper function,
+    // not the real class — spying needs the real class's prototype chain
+    // (where `export` actually lives, inherited from OTLPExporterBase).
+    const { OTLPLogExporter: RealOTLPLogExporter } = await vi.importActual<
+      typeof import("@opentelemetry/exporter-logs-otlp-http")
+    >("@opentelemetry/exporter-logs-otlp-http");
+    const exportSpy = vi
+      .spyOn(Object.getPrototypeOf(RealOTLPLogExporter.prototype), "export")
+      .mockImplementation((_records: unknown, resultCallback: (result: { code: number }) => void) => {
+        // Short-circuit the real network export — this test only verifies
+        // the processor actually reaches the exporter with a real batch,
+        // not that a real OTLP endpoint is live.
+        resultCallback({ code: 0 });
+      });
+    const config = createConfig();
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const pipeline = initLogPipeline(config, logger);
+    expect(pipeline).not.toBeNull();
+
+    pipeline?.emit({ level: "info", message: "flush regression probe", logger: "test" });
+    await pipeline?.loggerProvider.forceFlush();
+
+    expect(exportSpy).toHaveBeenCalled();
+    const [records] = exportSpy.mock.calls[0]!;
+    expect(records.length).toBeGreaterThan(0);
+
+    exportSpy.mockRestore();
+    await pipeline?.shutdown();
   });
 });
 
@@ -666,6 +712,26 @@ describe("log pipeline — per-signal endpoint override (FR #72)", () => {
     expect(logger.info).toHaveBeenCalledWith(
       "[otel-logs] Log exporter → http://localhost:4318/v1/logs (http)",
     );
+    void pipeline?.shutdown();
+  });
+
+  it("converts headers to a real grpc.Metadata instance for the gRPC log exporter, not a plain headers option", () => {
+    // Same headers→metadata conversion as traces/metrics (see
+    // telemetry-lifecycle.test.ts) — gRPC's config type doesn't accept
+    // `headers` at all.
+    const config = createConfig({
+      protocol: "grpc",
+      headers: { Authorization: "Bearer shared" },
+      signalEndpoints: { logs: "http://127.0.0.1:24317" },
+    });
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const pipeline = initLogPipeline(config, logger);
+
+    const callArgs = (OTLPLogExporterGRPC as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    expect(callArgs.headers).toBeUndefined();
+    expect(callArgs.metadata).toBeInstanceOf(Metadata);
+    expect(callArgs.metadata.get("Authorization")).toEqual(["Bearer shared"]);
+
     void pipeline?.shutdown();
   });
 });

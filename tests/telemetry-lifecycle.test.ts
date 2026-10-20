@@ -17,9 +17,24 @@ vi.mock("@opentelemetry/exporter-metrics-otlp-http", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opentelemetry/exporter-metrics-otlp-http")>();
   return { ...actual, OTLPMetricExporter: vi.fn((opts: any) => new actual.OTLPMetricExporter(opts)) };
 });
+// Same wrap-not-replace pattern for the gRPC exporters — regression
+// coverage for the headers→metadata conversion (gRPC's config type
+// doesn't accept plain `headers`; this plugin must convert to a real
+// grpc.Metadata instance instead).
+vi.mock("@opentelemetry/exporter-trace-otlp-grpc", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opentelemetry/exporter-trace-otlp-grpc")>();
+  return { ...actual, OTLPTraceExporter: vi.fn((opts: any) => new actual.OTLPTraceExporter(opts)) };
+});
+vi.mock("@opentelemetry/exporter-metrics-otlp-grpc", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opentelemetry/exporter-metrics-otlp-grpc")>();
+  return { ...actual, OTLPMetricExporter: vi.fn((opts: any) => new actual.OTLPMetricExporter(opts)) };
+});
 
+import { Metadata } from "@grpc/grpc-js";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
+import { OTLPTraceExporter as OTLPTraceExporterGRPC } from "@opentelemetry/exporter-trace-otlp-grpc";
+import { OTLPMetricExporter as OTLPMetricExporterGRPC } from "@opentelemetry/exporter-metrics-otlp-grpc";
 import { CONTENT_POLICY_DISABLED, type OtelObservabilityConfig } from "../src/config.js";
 import { PRELOADED_OTEL_SDK_ENV, initTelemetry, type TelemetryRuntime } from "../src/telemetry.js";
 
@@ -299,5 +314,37 @@ describe("telemetry runtime lifecycle", () => {
         "[otel] Trace exporter → http://127.0.0.1:24317 (grpc)",
       ),
     );
+  });
+
+  it("converts headers to a real grpc.Metadata instance for the trace and metric gRPC exporters, not a plain headers option", async () => {
+    // @opentelemetry/otlp-grpc-exporter-base's gRPC config type doesn't
+    // accept `headers` at all (gRPC transports custom key/value pairs as
+    // Metadata) — passing it there was always a silent no-op even before
+    // this was enforced at the type level. Only inspecting the real
+    // constructor call proves the conversion actually happened.
+    track(
+      initTelemetry(
+        baseConfig({
+          protocol: "grpc",
+          traces: true,
+          metrics: true,
+          headers: { Authorization: "Bearer shared" },
+          signalEndpoints: { traces: "http://127.0.0.1:24317", metrics: "http://127.0.0.1:24318" },
+        }),
+        makeLoggerSpy(),
+      ),
+    );
+
+    const traceCallArgs = (OTLPTraceExporterGRPC as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0];
+    expect(traceCallArgs.headers).toBeUndefined();
+    expect(traceCallArgs.metadata).toBeInstanceOf(Metadata);
+    expect(traceCallArgs.metadata.get("Authorization")).toEqual(["Bearer shared"]);
+
+    const metricCallArgs = (OTLPMetricExporterGRPC as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0];
+    expect(metricCallArgs.headers).toBeUndefined();
+    expect(metricCallArgs.metadata).toBeInstanceOf(Metadata);
+    expect(metricCallArgs.metadata.get("Authorization")).toEqual(["Bearer shared"]);
   });
 });

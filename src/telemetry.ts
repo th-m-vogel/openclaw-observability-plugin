@@ -27,6 +27,7 @@ import { OTLPMetricExporter as OTLPMetricExporterGRPC } from "@opentelemetry/exp
 
 import { resolveSignalConfig, type OtelObservabilityConfig } from "./config.js";
 import { setupGlobalPropagator } from "./propagation.js";
+import { toGrpcMetadata } from "./grpc-metadata.js";
 import {
   METRIC_OPERATION_DURATION,
   METRIC_TOKEN_USAGE,
@@ -406,7 +407,7 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
 
       const traceExporter =
         config.protocol === "grpc"
-          ? new OTLPTraceExporterGRPC({ url: traceEndpoint, headers: traceSignal.headers })
+          ? new OTLPTraceExporterGRPC({ url: traceEndpoint, metadata: toGrpcMetadata(traceSignal.headers) })
           : new OTLPTraceExporterHTTP({ url: traceEndpoint, headers: traceSignal.headers });
 
       // Head-based sampling: when sampleRate is set, wrap a TraceIdRatioBased
@@ -456,7 +457,7 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
   if (config.metrics) {
     const metricExporter =
       config.protocol === "grpc"
-        ? new OTLPMetricExporterGRPC({ url: metricsEndpoint, headers: metricsSignal.headers })
+        ? new OTLPMetricExporterGRPC({ url: metricsEndpoint, metadata: toGrpcMetadata(metricsSignal.headers) })
         : new OTLPMetricExporterHTTP({ url: metricsEndpoint, headers: metricsSignal.headers });
 
     meterProvider = new MeterProvider({
