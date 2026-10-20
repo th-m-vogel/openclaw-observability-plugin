@@ -2,6 +2,8 @@
 
 All metrics use the `openclaw.*` namespace and are exported via OTLP at the configured interval (default: 30 seconds).
 
+> This page covers metrics emitted by **this plugin** only. For OpenClaw core's own first-party metric catalog (emitted by the official `diagnostics-otel` plugin — see [index](../index.md) for how the two relate), the authoritative reference is [OpenClaw core: Model calls and exported metrics](https://docs.openclaw.ai/gateway/opentelemetry/model-calls-and-metrics). Always check that page (or the core source directly) before assuming a field exists on a diagnostic event — see [Limitations](../limitations.md) for a real example of what happens when that isn't done.
+
 ## LLM Metrics
 
 > **0.11.0+:** `openclaw.llm.requests` and `.duration` record once per real model API call, from the `model_call_started`/`model_call_ended` hook pair, instead of once per **agent turn** from the `model.usage` diagnostic event (a turn may cover several real calls in a tool-use loop).
@@ -26,10 +28,6 @@ This is the feature to reach for when you need a metric that's *reliably* rate-a
 | `openclaw.llm.tokens.total` | `openclaw.llm.tokens.total_by_model` |
 | `openclaw.llm.tokens.prompt` | `openclaw.llm.tokens.prompt_by_model` |
 | `openclaw.llm.tokens.completion` | `openclaw.llm.tokens.completion_by_model` |
-| `openclaw.llm.tokens.system` | `openclaw.llm.tokens.system_by_model` |
-| `openclaw.llm.tokens.user` | `openclaw.llm.tokens.user_by_model` |
-| `openclaw.llm.tokens.tool_result` | `openclaw.llm.tokens.tool_result_by_model` |
-| `openclaw.llm.tokens.skill` | `openclaw.llm.tokens.skill_by_model` |
 | `openclaw.llm.cost.usd` | `openclaw.llm.cost.usd_by_model` |
 | `gen_ai.client.token.usage` (stable semconv) | `openclaw.genai.client.token.usage_by_model` |
 | `gen_ai.client.operation.duration` (stable semconv) | `openclaw.genai.client.operation.duration_by_model` |

@@ -612,10 +612,8 @@ export async function registerDiagnosticsListener(
     // `model.call.completed`/`model.call.error` diagnostic events above —
     // real per-call usage, confirmed available since OpenClaw v2026.9.8
     // (openclaw/openclaw#166623). What stays here: cost (no per-call cost
-    // field exists anywhere in the plugin API) and the ISI-1018
-    // system/user/tool_result/skill breakdown (not present in per-call
-    // usage either). Both still need the dedup guard below, since this
-    // event can still double-dispatch (#166289).
+    // field exists anywhere in the plugin API). Still needs the dedup guard
+    // below, since this event can still double-dispatch (#166289).
     // Round cost/tokens before keying the dedup map: a duplicate dispatch
     // can recompute cost with a tiny floating-point difference (identical
     // at the precision the debug log below displays, different in full
@@ -636,20 +634,6 @@ export async function registerDiagnosticsListener(
     }
 
     if (!isDuplicate) {
-      // ISI-1018: Token breakdown by type (system, user, tool_result, skill)
-      if (usage.system) {
-        counters.tokensSystem.add(usage.system, metricAttrs);
-      }
-      if (usage.user) {
-        counters.tokensUser.add(usage.user, metricAttrs);
-      }
-      if (usage.toolResult) {
-        counters.tokensToolResult.add(usage.toolResult, metricAttrs);
-      }
-      if (usage.skill) {
-        counters.tokensSkill.add(usage.skill, metricAttrs);
-      }
-
       // Record cost metric
       if (typeof costUsd === "number" && costUsd > 0) {
         counters.costUsd.add(costUsd, metricAttrs);
@@ -657,18 +641,6 @@ export async function registerDiagnosticsListener(
 
       if (config.enableByModelMetrics) {
         const byModelAttrs = stripToModelTierAttrs(metricAttrs);
-        if (usage.system) {
-          counters.tokensSystemByModel.add(usage.system, byModelAttrs);
-        }
-        if (usage.user) {
-          counters.tokensUserByModel.add(usage.user, byModelAttrs);
-        }
-        if (usage.toolResult) {
-          counters.tokensToolResultByModel.add(usage.toolResult, byModelAttrs);
-        }
-        if (usage.skill) {
-          counters.tokensSkillByModel.add(usage.skill, byModelAttrs);
-        }
         if (typeof costUsd === "number" && costUsd > 0) {
           counters.costUsdByModel.add(costUsd, byModelAttrs);
         }
