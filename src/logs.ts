@@ -20,6 +20,7 @@ import {
   OTEL_SCHEMA_URL,
 } from "./semconv.js";
 import { redactSensitiveText } from "./security.js";
+import { toGrpcMetadata } from "./grpc-metadata.js";
 import { PLUGIN_VERSION } from "./version.js";
 
 type LogEvent = {
@@ -286,7 +287,7 @@ export function initLogPipeline(
 
   const logExporter =
     config.protocol === "grpc"
-      ? new OTLPLogExporterGRPC({ url: logEndpoint, headers: logsSignal.headers })
+      ? new OTLPLogExporterGRPC({ url: logEndpoint, metadata: toGrpcMetadata(logsSignal.headers) })
       : new OTLPLogExporterHTTP({ url: logEndpoint, headers: logsSignal.headers });
 
   // ISI-995: mirror the trace/metric Resource — real plugin version from
@@ -306,7 +307,8 @@ export function initLogPipeline(
   const loggerProvider = new LoggerProvider({
     resource,
     processors: [
-      new BatchLogRecordProcessor(logExporter, {
+      new BatchLogRecordProcessor({
+        exporter: logExporter,
         maxExportBatchSize: 512,
         scheduledDelayMillis: 5000,
       }),
