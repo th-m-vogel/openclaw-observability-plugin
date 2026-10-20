@@ -2,6 +2,8 @@
 
 All metrics use the `openclaw.*` namespace and are exported via OTLP at the configured interval (default: 30 seconds).
 
+> This page covers metrics emitted by **this plugin** only. For OpenClaw core's own first-party metric catalog (emitted by the official `diagnostics-otel` plugin — see [index](../index.md) for how the two relate), the authoritative reference is [OpenClaw core: Model calls and exported metrics](https://docs.openclaw.ai/gateway/opentelemetry/model-calls-and-metrics). Always check that page (or the core source directly) before assuming a field exists on a diagnostic event — see [Limitations](../limitations.md) for a real example of what happens when that isn't done.
+
 ## LLM Metrics
 
 > **0.11.0+:** `openclaw.llm.requests` and `.duration` record once per real model API call, from the `model_call_started`/`model_call_ended` hook pair, instead of once per **agent turn** from the `model.usage` diagnostic event (a turn may cover several real calls in a tool-use loop).

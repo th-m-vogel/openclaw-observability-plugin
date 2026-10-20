@@ -2,6 +2,8 @@
 
 The plugin generates connected distributed traces using OpenClaw's hook-based plugin API.
 
+> This page covers spans emitted by **this plugin** only. For OpenClaw core's own first-party spans and the full diagnostic event catalog they're built from (emitted by the official `diagnostics-otel` plugin — see [index](../index.md) for how the two relate), see [OpenClaw core: Exported spans and diagnostic events](https://docs.openclaw.ai/gateway/opentelemetry/spans-and-events).
+
 ## Trace Structure
 
 Every user message produces a trace tree:

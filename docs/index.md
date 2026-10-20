@@ -69,9 +69,11 @@ See [Getting Started](getting-started.md) for detailed instructions.
 
 | Signal | Data |
 |--------|------|
-| **Metrics** | `openclaw.tokens`, `openclaw.cost.usd`, `openclaw.run.duration_ms`, `openclaw.webhook.*`, `openclaw.message.*`, `openclaw.queue.*`, `openclaw.session.*` (all emitted by `diagnostics-otel`, not by this plugin) |
-| **Traces** | Model usage, webhook processing, message processing, stuck sessions |
+| **Metrics** | `openclaw.tokens`, `openclaw.cost.usd`, `openclaw.run.duration_ms`, `openclaw.webhook.*`, `openclaw.message.*`, `openclaw.queue.*`, `openclaw.session.*` (all emitted by `diagnostics-otel`, not by this plugin) — full catalog: [OpenClaw core: Model calls and exported metrics](https://docs.openclaw.ai/gateway/opentelemetry/model-calls-and-metrics) |
+| **Traces** | Model usage, webhook processing, message processing, stuck sessions — full catalog: [OpenClaw core: Exported spans and diagnostic events](https://docs.openclaw.ai/gateway/opentelemetry/spans-and-events) |
 | **Logs** | All Gateway logs with severity, subsystem, code location |
+
+These two pages are also the authoritative reference for what fields actually exist on a diagnostic event — useful when building against or comparing to this plugin's own telemetry (see [Limitations](limitations.md)).
 
 ### Custom Plugin (This Repo)
 
