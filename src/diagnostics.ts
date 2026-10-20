@@ -458,6 +458,23 @@ export async function registerDiagnosticsListener(
       return;
     }
 
+    // Skill usage (core's `skill.used` trusted diagnostic event — same
+    // general dispatch channel as `model.usage`, confirmed against core
+    // source). Attribute names mirror core's own `openclaw.skill.used`
+    // metric exactly (see docs/gateway/opentelemetry/model-calls-and-metrics).
+    if (evt.type === "skill.used") {
+      const attrs: Record<string, string> = {
+        "openclaw.skill.name": evt.skillName,
+        "openclaw.skill.source": evt.skillSource,
+        "openclaw.skill.activation": evt.activation,
+      };
+      if (evt.agentId) attrs["openclaw.agent"] = evt.agentId;
+      if (evt.toolName) attrs["openclaw.toolName"] = evt.toolName;
+      counters.skillUsed.add(1, attrs);
+      logger.debug?.(`[otel] skill.used: skill=${evt.skillName}, source=${evt.skillSource}, activation=${evt.activation}`);
+      return;
+    }
+
     // 0.12.0+: real per-call token usage. Unlike `model_call_started`/
     // `model_call_ended` (the plugin *hooks*, confirmed to carry no usage
     // field — see hooks.ts), these are `onInternalDiagnosticEvent`

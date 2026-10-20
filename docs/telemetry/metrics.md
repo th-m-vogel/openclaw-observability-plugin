@@ -155,6 +155,19 @@ Broken down by tool name. High error rates on specific tools may indicate config
 
 How long each tool takes. Useful for identifying slow tools that bottleneck agent turns.
 
+## Skill Metrics
+
+### `openclaw.skill.used`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | 1 |
+| **Attributes** | `openclaw.skill.name`, `openclaw.skill.source`, `openclaw.skill.activation`, optional `openclaw.agent`, optional `openclaw.toolName` |
+| **Description** | A skill was invoked (via a `/command` or a bundled `Skill` tool read) |
+
+Sourced from OpenClaw core's own `skill.used` trusted diagnostic event (same general dispatch channel as `model.usage`; see [OpenClaw core: Model calls and exported metrics](https://docs.openclaw.ai/gateway/opentelemetry/model-calls-and-metrics)). `openclaw.skill.source` is `bundled`, `workspace`, or `unknown`; `openclaw.skill.activation` is `command` or `read`. `openclaw.agent`/`openclaw.toolName` are present only when the underlying event carries them.
+
 ## Agent Metrics
 
 ### `openclaw.agent.turn_duration`

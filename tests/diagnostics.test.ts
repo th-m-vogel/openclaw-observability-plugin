@@ -53,6 +53,7 @@ function createTelemetry() {
       tokensPromptByModel: createCounter(),
       tokensCompletionByModel: createCounter(),
       costUsdByModel: createCounter(),
+      skillUsed: createCounter(),
     },
     histograms: {
       genAiOperationDuration: createHistogram(),
@@ -644,6 +645,64 @@ describe("model.usage _by_model sibling for cost", () => {
     await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
 
     expect(telemetry.counters.costUsdByModel.add).not.toHaveBeenCalled();
+  });
+});
+
+describe("skill.used diagnostic event", () => {
+  it("records a skill usage with all optional fields present", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "skill.used",
+          sessionKey: "agent:main:new",
+          agentId: "main",
+          skillName: "writing-plans",
+          skillSource: "bundled",
+          activation: "command",
+          toolName: "Skill",
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.skillUsed.add).toHaveBeenCalledWith(1, {
+      "openclaw.skill.name": "writing-plans",
+      "openclaw.skill.source": "bundled",
+      "openclaw.skill.activation": "command",
+      "openclaw.agent": "main",
+      "openclaw.toolName": "Skill",
+    });
+  });
+
+  it("omits the agent/toolName attributes when not present on the event", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function onInternalDiagnosticEvent(listener) {
+        listener({
+          type: "skill.used",
+          sessionKey: "agent:main:new",
+          skillName: "brainstorming",
+          skillSource: "workspace",
+          activation: "read",
+        });
+        return () => undefined;
+      }\n`,
+    );
+    const telemetry = createTelemetry();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), createLogger(), telemetry);
+
+    expect(telemetry.counters.skillUsed.add).toHaveBeenCalledWith(1, {
+      "openclaw.skill.name": "brainstorming",
+      "openclaw.skill.source": "workspace",
+      "openclaw.skill.activation": "read",
+    });
   });
 });
 
