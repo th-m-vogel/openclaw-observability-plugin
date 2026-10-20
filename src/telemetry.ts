@@ -213,6 +213,8 @@ export interface OtelCounters {
   compactionCount: Counter;
   /** Memory pressure events */
   memoryPressure: Counter;
+  /** Skill usage events (attrs: name, source, activation, optional agent/toolName) */
+  skillUsed: Counter;
 }
 
 export interface OtelHistograms {
@@ -627,6 +629,10 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     }),
     memoryPressure: meter.createCounter("openclaw.memory.pressure", {
       description: "Diagnostic memory pressure events",
+      unit: "1",
+    }),
+    skillUsed: meter.createCounter("openclaw.skill.used", {
+      description: "Skill usage events",
       unit: "1",
     }),
   };
