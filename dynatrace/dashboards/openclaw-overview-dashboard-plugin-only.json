@@ -86,11 +86,7 @@
         "title": "Token Usage by Type",
         "query": "timeseries {
   prompt = sum(openclaw.llm.tokens.prompt),
-  completion = sum(openclaw.llm.tokens.completion),
-  system = sum(openclaw.llm.tokens.system),
-  user = sum(openclaw.llm.tokens.user),
-  tool_result = sum(openclaw.llm.tokens.tool_result),
-  skill = sum(openclaw.llm.tokens.skill)
+  completion = sum(openclaw.llm.tokens.completion)
 }, interval:10m",
         "visualization": "areaChart",
         "visualizationSettings": {

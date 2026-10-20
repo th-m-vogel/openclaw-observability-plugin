@@ -26,10 +26,6 @@ This is the feature to reach for when you need a metric that's *reliably* rate-a
 | `openclaw.llm.tokens.total` | `openclaw.llm.tokens.total_by_model` |
 | `openclaw.llm.tokens.prompt` | `openclaw.llm.tokens.prompt_by_model` |
 | `openclaw.llm.tokens.completion` | `openclaw.llm.tokens.completion_by_model` |
-| `openclaw.llm.tokens.system` | `openclaw.llm.tokens.system_by_model` |
-| `openclaw.llm.tokens.user` | `openclaw.llm.tokens.user_by_model` |
-| `openclaw.llm.tokens.tool_result` | `openclaw.llm.tokens.tool_result_by_model` |
-| `openclaw.llm.tokens.skill` | `openclaw.llm.tokens.skill_by_model` |
 | `openclaw.llm.cost.usd` | `openclaw.llm.cost.usd_by_model` |
 | `gen_ai.client.token.usage` (stable semconv) | `openclaw.genai.client.token.usage_by_model` |
 | `gen_ai.client.operation.duration` (stable semconv) | `openclaw.genai.client.operation.duration_by_model` |

@@ -199,24 +199,8 @@ export interface OtelCounters {
   livenessWarnings: Counter;
   /** Diagnostic heartbeat events */
   diagnosticHeartbeats: Counter;
-  /** System prompt tokens */
-  tokensSystem: Counter;
-  /** User message tokens */
-  tokensUser: Counter;
-  /** Tool result tokens */
-  tokensToolResult: Counter;
-  /** Skill tokens */
-  tokensSkill: Counter;
   /** Estimated LLM cost in USD */
   costUsd: Counter;
-  /** System prompt tokens, aggregated by provider+model (rate-able even for one-shot sessions) */
-  tokensSystemByModel: Counter;
-  /** User message tokens, aggregated by provider+model (rate-able even for one-shot sessions) */
-  tokensUserByModel: Counter;
-  /** Tool result tokens, aggregated by provider+model (rate-able even for one-shot sessions) */
-  tokensToolResultByModel: Counter;
-  /** Skill tokens, aggregated by provider+model (rate-able even for one-shot sessions) */
-  tokensSkillByModel: Counter;
   /** Estimated LLM cost in USD, aggregated by provider+model (rate-able even for one-shot sessions) */
   costUsdByModel: Counter;
   /** Webhook received events */
@@ -270,8 +254,6 @@ export interface OtelHistograms {
   gatewayCpuCoreRatio: Histogram;
   /** Gateway work queued */
   gatewayWorkQueued: Histogram;
-  /** Context build duration in ms */
-  contextBuildDuration: Histogram;
   /** Webhook processing duration in ms */
   webhookDuration: Histogram;
   /** Webhook payload size in bytes */
@@ -617,42 +599,9 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Total diagnostic heartbeat events",
       unit: "events",
     }),
-    // Token breakdown by type (ISI-1018)
-    tokensSystem: meter.createCounter("openclaw.llm.tokens.system", {
-      description: "System prompt tokens",
-      unit: "tokens",
-    }),
-    tokensUser: meter.createCounter("openclaw.llm.tokens.user", {
-      description: "User message tokens",
-      unit: "tokens",
-    }),
-    tokensToolResult: meter.createCounter("openclaw.llm.tokens.tool_result", {
-      description: "Tool result tokens",
-      unit: "tokens",
-    }),
-    tokensSkill: meter.createCounter("openclaw.llm.tokens.skill", {
-      description: "Skill tokens",
-      unit: "tokens",
-    }),
     costUsd: meter.createCounter("openclaw.llm.cost.usd", {
       description: "Estimated LLM cost in USD",
       unit: "usd",
-    }),
-    tokensSystemByModel: meter.createCounter("openclaw.llm.tokens.system_by_model", {
-      description: "System prompt tokens, aggregated by provider+model (rate-able even for one-shot sessions)",
-      unit: "tokens",
-    }),
-    tokensUserByModel: meter.createCounter("openclaw.llm.tokens.user_by_model", {
-      description: "User message tokens, aggregated by provider+model (rate-able even for one-shot sessions)",
-      unit: "tokens",
-    }),
-    tokensToolResultByModel: meter.createCounter("openclaw.llm.tokens.tool_result_by_model", {
-      description: "Tool result tokens, aggregated by provider+model (rate-able even for one-shot sessions)",
-      unit: "tokens",
-    }),
-    tokensSkillByModel: meter.createCounter("openclaw.llm.tokens.skill_by_model", {
-      description: "Skill tokens, aggregated by provider+model (rate-able even for one-shot sessions)",
-      unit: "tokens",
     }),
     costUsdByModel: meter.createCounter("openclaw.llm.cost.usd_by_model", {
       description: "Estimated LLM cost in USD, aggregated by provider+model (rate-able even for one-shot sessions)",
@@ -760,11 +709,6 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     gatewayWorkQueued: meter.createHistogram("openclaw.gateway.work_queued", {
       description: "Gateway work queued",
       unit: "items",
-    }),
-    // Context build duration (ISI-1018)
-    contextBuildDuration: meter.createHistogram("openclaw.context.build_duration", {
-      description: "Context build duration",
-      unit: "ms",
     }),
     // Webhook histograms (ISI-1020)
     webhookDuration: meter.createHistogram("openclaw.webhook.duration", {
