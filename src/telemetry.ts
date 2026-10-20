@@ -215,6 +215,8 @@ export interface OtelCounters {
   memoryPressure: Counter;
   /** Skill usage events (attrs: name, source, activation, optional agent/toolName) */
   skillUsed: Counter;
+  /** Model/provider failover events */
+  modelFailover: Counter;
 }
 
 export interface OtelHistograms {
@@ -633,6 +635,10 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     }),
     skillUsed: meter.createCounter("openclaw.skill.used", {
       description: "Skill usage events",
+      unit: "1",
+    }),
+    modelFailover: meter.createCounter("openclaw.model.failover", {
+      description: "Model/provider failover events",
       unit: "1",
     }),
   };

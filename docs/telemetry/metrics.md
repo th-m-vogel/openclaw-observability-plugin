@@ -114,6 +114,17 @@ Latency distribution for individual LLM calls (not full agent turns — see `ope
 
 `openclaw.llm.requests`/`.duration` moved to a per-call hook in 0.11.0 because they don't need any usage data — a call either happened or it didn't, and timing is always available. `openclaw.llm.tokens.*` needed OpenClaw core to tell the plugin how many tokens a given call used; that didn't exist on the obvious-looking hook pair (`model_call_started`/`model_call_ended`, which deliberately carries no usage), but does exist, since v2026.9.8, on the separate `model.call.completed`/`model.call.error` diagnostic events, which this plugin adopted in 0.11.0. See `docs/limitations.md` for the full investigation and what's still turn-level only (cost).
 
+### `openclaw.model.failover`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | 1 |
+| **Attributes** | `openclaw.provider`, `openclaw.model`, `openclaw.failover.to_provider`, `openclaw.failover.to_model`, `openclaw.failover.reason`, `openclaw.failover.suspended`, `openclaw.lane` — all optional, present only when the underlying event carries them |
+| **Description** | OpenClaw core switched provider/model mid-session (error, rate limit, or routing policy) |
+
+Sourced from core's own `model.failover` trusted diagnostic event (same general dispatch channel as `model.usage`; see [OpenClaw core: Model calls and exported metrics](https://docs.openclaw.ai/gateway/opentelemetry/model-calls-and-metrics)). Useful for catching real incidents as they happen instead of reconstructing them from logs after the fact — e.g. an upstream provider outage triggering an automatic fallback.
+
 ## Tool Metrics
 
 ### `openclaw.tool.calls`

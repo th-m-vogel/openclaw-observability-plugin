@@ -80,7 +80,7 @@ These two pages are also the authoritative reference for what fields actually ex
 | Signal | Data |
 |--------|------|
 | **Traces** | `openclaw.request` → `openclaw.agent.turn` → `tool.*` (connected hierarchy) |
-| **Metrics** | `openclaw.llm.tokens.{total,prompt,completion}`, `openclaw.llm.cost.usd`, `openclaw.tool.calls`, `openclaw.session.resets`, `openclaw.skill.used`, plus the OTel stable `gen_ai.*` set |
+| **Metrics** | `openclaw.llm.tokens.{total,prompt,completion}`, `openclaw.llm.cost.usd`, `openclaw.tool.calls`, `openclaw.session.resets`, `openclaw.skill.used`, `openclaw.model.failover`, plus the OTel stable `gen_ai.*` set |
 
 ## Trace Structure Comparison
 
