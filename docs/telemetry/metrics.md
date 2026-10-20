@@ -166,6 +166,17 @@ Broken down by tool name. High error rates on specific tools may indicate config
 
 How long each tool takes. Useful for identifying slow tools that bottleneck agent turns.
 
+### `openclaw.tool.loop`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | 1 |
+| **Attributes** | `openclaw.toolName`, `openclaw.loop.level` (`warning`/`critical`), `openclaw.loop.action` (`warn`/`block`), `openclaw.loop.detector`, `openclaw.loop.count`, optional `openclaw.loop.paired_tool` |
+| **Description** | OpenClaw core detected a repetitive tool-call loop and warned or blocked it |
+
+Sourced from core's own `tool.loop` internal diagnostic event (same general dispatch channel as `model.usage`; see [OpenClaw core: Model calls and exported metrics](https://docs.openclaw.ai/gateway/opentelemetry/model-calls-and-metrics)). `openclaw.loop.detector` is one of `generic_repeat`, `argument_churn`, `unknown_tool_repeat`, `known_poll_no_progress`, `global_circuit_breaker`, or `ping_pong`. Useful as a runaway-agent safety signal — e.g. catching a stuck skill-workshop session looping on the same tool call instead of making progress — complementing the security-detection layer below.
+
 ## Skill Metrics
 
 ### `openclaw.skill.used`

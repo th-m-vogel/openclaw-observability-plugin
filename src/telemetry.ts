@@ -217,6 +217,8 @@ export interface OtelCounters {
   skillUsed: Counter;
   /** Model/provider failover events */
   modelFailover: Counter;
+  /** Repetitive tool-call loop detection events */
+  toolLoop: Counter;
 }
 
 export interface OtelHistograms {
@@ -639,6 +641,10 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     }),
     modelFailover: meter.createCounter("openclaw.model.failover", {
       description: "Model/provider failover events",
+      unit: "1",
+    }),
+    toolLoop: meter.createCounter("openclaw.tool.loop", {
+      description: "Repetitive tool-call loop detection events",
       unit: "1",
     }),
   };

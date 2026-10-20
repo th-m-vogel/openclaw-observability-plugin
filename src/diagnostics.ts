@@ -493,6 +493,24 @@ export async function registerDiagnosticsListener(
       return;
     }
 
+    // Repetitive tool-call loop detection (core's `tool.loop` internal
+    // diagnostic event — same general dispatch channel as `model.usage`).
+    // Attribute names mirror core's own `openclaw.tool.loop` metric exactly
+    // (see docs/gateway/opentelemetry/model-calls-and-metrics).
+    if (evt.type === "tool.loop") {
+      const loopAttrs: Record<string, string> = {
+        "openclaw.toolName": evt.toolName,
+        "openclaw.loop.level": evt.level,
+        "openclaw.loop.action": evt.action,
+        "openclaw.loop.detector": evt.detector,
+        "openclaw.loop.count": String(evt.count),
+      };
+      if (evt.pairedToolName) loopAttrs["openclaw.loop.paired_tool"] = evt.pairedToolName;
+      counters.toolLoop.add(1, loopAttrs);
+      logger.debug?.(`[otel] tool.loop: tool=${evt.toolName}, level=${evt.level}, action=${evt.action}, detector=${evt.detector}, count=${evt.count}`);
+      return;
+    }
+
     // 0.12.0+: real per-call token usage. Unlike `model_call_started`/
     // `model_call_ended` (the plugin *hooks*, confirmed to carry no usage
     // field — see hooks.ts), these are `onInternalDiagnosticEvent`
