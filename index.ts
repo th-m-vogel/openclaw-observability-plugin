@@ -42,9 +42,9 @@ let gatewayStopFinalizationStarted = false;
 /**
  * Tracks the active registration's per-call resources (hooks, the
  * diagnostics-event subscription, the log pipeline, the gateway-logger
- * bridge, the ISI-9700 rejection-handler entry) so a subsequent
- * `register()` call can tear down the PREVIOUS call's resources before
- * setting up its own. `telemetry` itself doesn't need tracking here —
+ * bridge) so a subsequent `register()` call can tear down the PREVIOUS
+ * call's resources before setting up its own. `telemetry` itself doesn't
+ * need tracking here —
  * `initTelemetry()` already dedupes it via its own module-level
  * singleton (`initializedRuntime`).
  *
@@ -67,7 +67,6 @@ let activeRegistration: {
   unsubscribeDiagnostics: (() => void) | null;
   restoreLogger: (() => void) | null;
   logPipeline: LogPipelineRuntime | null;
-  rejectionHandlerCleanup: (() => void) | null;
 } | null = null;
 
 function teardownActiveRegistration(logger: any): void {
@@ -75,7 +74,7 @@ function teardownActiveRegistration(logger: any): void {
   logger.warn(
     "[otel] register() called again without a preceding stop() — " +
     "tearing down the previous registration's hooks/diagnostics-listener/" +
-    "log-pipeline/rejection-handler before setting up the new one " +
+    "log-pipeline before setting up the new one " +
     "(prevents duplicate model.usage cost/token counting)."
   );
   const prev = activeRegistration;
@@ -83,7 +82,6 @@ function teardownActiveRegistration(logger: any): void {
   prev.stopHooks?.();
   prev.unsubscribeDiagnostics?.();
   prev.restoreLogger?.();
-  prev.rejectionHandlerCleanup?.();
   prev.logPipeline?.shutdown().catch((err) => {
     logger.error(`[otel] Error shutting down previous log pipeline: ${String(err)}`);
   });
@@ -183,7 +181,6 @@ const otelObservabilityPlugin = {
       unsubscribeDiagnostics: null,
       restoreLogger: null,
       logPipeline: null,
-      rejectionHandlerCleanup: null,
     };
 
     let telemetry: TelemetryRuntime | null = null;
@@ -237,45 +234,6 @@ const otelObservabilityPlugin = {
     // sweeper interval) so service.stop() doesn't leak the timer.
     // (skipLongLivedInit itself is computed above, before the
     // active-registration bookkeeping — see the comment there.)
-
-    // ISI-9700: OpenClaw 9.7 regression — some async path produces an
-    // unhandled rejection with reason=undefined.  OpenClaw's own handler
-    // (package-update-activation-recovery.mjs) calls process.exit(1) for any
-    // rejection that is not transient and not already "handled", so a plain
-    // process.on("unhandledRejection", ...) listener fires too late.
-    //
-    // The fix: register into globalThis[Symbol.for("openclaw.unhandledRejection.handlers")]
-    // (the rejectionRegistry Set).  isHandled() queries every entry in that Set
-    // before deciding to crash; returning true here stops the exit.  We log the
-    // suppression so the symptom is observable even though we prevent the crash.
-    const REJECTION_HANDLERS_KEY = Symbol.for("openclaw.unhandledRejection.handlers");
-    let rejectionHandlerCleanup: (() => void) | null = null;
-    if (!skipLongLivedInit) {
-      const handlers = (globalThis as any)[REJECTION_HANDLERS_KEY];
-      if (handlers instanceof Set) {
-        const undefinedRejectionHandler = (reason: unknown): boolean => {
-          if (reason === undefined) {
-            logger.warn(
-              "[otel] ISI-9700: suppressed unhandled rejection with undefined reason " +
-              "(9.7 regression). Gateway protected from crash — " +
-              "root cause still under investigation."
-            );
-            return true;
-          }
-          return false;
-        };
-        handlers.add(undefinedRejectionHandler);
-        rejectionHandlerCleanup = () => handlers.delete(undefinedRejectionHandler);
-        thisRegistration.rejectionHandlerCleanup = rejectionHandlerCleanup;
-        logger.info("[otel] ISI-9700: registered undefined-rejection guard in rejectionRegistry");
-      } else {
-        logger.warn(
-          "[otel] ISI-9700: rejectionRegistry not found at " +
-          "globalThis[Symbol.for('openclaw.unhandledRejection.handlers')] — " +
-          "crash protection not active (OpenClaw version may have changed the API)"
-        );
-      }
-    }
 
     try {
       if (!skipLongLivedInit) {
@@ -478,10 +436,6 @@ const otelObservabilityPlugin = {
       },
 
       stop: async () => {
-        if (rejectionHandlerCleanup) {
-          rejectionHandlerCleanup();
-          rejectionHandlerCleanup = null;
-        }
         if (stopHooks) {
           stopHooks();
           stopHooks = null;
