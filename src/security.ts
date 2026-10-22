@@ -23,18 +23,23 @@ const SENSITIVE_FILE_PATTERNS = [
   /\.ssh\//i,
   /id_rsa/i,
   /id_ed25519/i,
-  /credentials/i,
+  /\bcredentials?\b/i,
   /\.aws\/credentials/i,
   /\.kube\/config/i,
   /\.docker\/config\.json/i,
   /\.netrc/i,
   /\.pgpass/i,
   /\.my\.cnf/i,
-  /password/i,
-  /secret/i,
-  /token/i,
-  /api[_-]?key/i,
-  /private[_-]?key/i,
+  // Word-boundary anchored: a bare substring match (e.g. `/secret/i`)
+  // false-positives on ordinary project paths that merely contain the
+  // word as part of a longer identifier (`tokenizer.ts`, `telemetry/`) —
+  // see ISI-9800. `\b` keeps real credential-shaped names (`password.txt`,
+  // `api-key.json`, `private_key.pem`) matching.
+  /\bpassword\b/i,
+  /\bsecrets?\b/i,
+  /\btokens?\b/i,
+  /\bapi[_-]?keys?\b/i,
+  /\bprivate[_-]?keys?\b/i,
 ];
 
 /** Detection 2: Prompt injection patterns */
@@ -307,7 +312,7 @@ export function enrichSpanWithSecurityEvent(
   if (event.severity === "critical" || event.severity === "high") {
     span.setStatus({
       code: SpanStatusCode.ERROR,
-      message: `Security: ${event.detection} - ${event.description}`,
+      message: `Security: ${event.detection} - ${redactSensitiveText(event.description)}`,
     });
   }
   

@@ -308,6 +308,28 @@ describe("plugin hook registration (ISI-730 migration)", () => {
     stopHooks();
   });
 
+  it("before_model_resolve never logs raw ctx content (ISI-9800: ctx may carry workspace paths/content)", () => {
+    const { api, typedHooks, logger } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const handler = typedHooks.get("before_model_resolve")!;
+    const sensitiveValue = "/home/someone/secret-project/.env API_KEY=super-secret-token";
+    handler({ prompt: "hi" }, {
+      agentId: "claude-4",
+      sessionKey: "session-123",
+      workspacePath: sensitiveValue,
+    });
+
+    for (const call of logger.info.mock.calls) {
+      const logged = call.join(" ");
+      expect(logged).not.toContain(sensitiveValue);
+      expect(logged).not.toContain("API_KEY");
+    }
+
+    stopHooks();
+  });
+
   it("before_prompt_build enriches the existing agent.turn span with prompt + history size", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();

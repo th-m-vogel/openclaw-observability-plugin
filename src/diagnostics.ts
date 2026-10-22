@@ -197,6 +197,18 @@ async function loadInternalDiagnostics(logger?: DiagnosticsLogger): Promise<void
  */
 export const MIN_SUPPORTED_OPENCLAW_VERSION = "2026.9.8";
 
+/**
+ * Version floor this plugin's manifest (`openclaw.plugin.json`'s
+ * `minOpenClawVersion`) actually requires. Raised to 2026.9.9 when the
+ * ISI-9700 undefined-rejection crash guard was removed (core fixed the
+ * underlying bug, openclaw/openclaw#162031, as of this release) — hosts
+ * below this version have neither the core fix nor this plugin's old
+ * local mitigation, and OpenClaw core does not itself enforce a plugin
+ * manifest's declared floor, so this is the only runtime signal an
+ * operator on an unpatched host gets.
+ */
+export const REQUIRED_OPENCLAW_VERSION = "2026.9.9";
+
 function resolveOpenclawInstallRoot(entryFile: string | undefined): string | undefined {
   if (!entryFile) return undefined;
   const resolvedEntry = safeRealpath(entryFile);
@@ -252,6 +264,13 @@ function checkMinimumOpenclawVersion(entryFile: string | undefined, logger?: Dia
     logger?.warn?.(
       `[otel] Detected OpenClaw v${installedVersion}, below this plugin's minimum supported version v${MIN_SUPPORTED_OPENCLAW_VERSION}. ` +
       `Real per-call token metrics (openclaw.llm.tokens.*) require v${MIN_SUPPORTED_OPENCLAW_VERSION}+ and will be missing or incomplete on this install. See docs/limitations.md.`
+    );
+  }
+  if (compareVersions(installedVersion, REQUIRED_OPENCLAW_VERSION) < 0) {
+    logger?.warn?.(
+      `[otel] Detected OpenClaw v${installedVersion}, below v${REQUIRED_OPENCLAW_VERSION} (this plugin's manifest minOpenClawVersion). ` +
+      `This host is missing the core fix for openclaw/openclaw#162031 (undefined-rejection crash) and this plugin no longer carries its own ` +
+      `workaround for it (removed once the core fix shipped) — upgrade OpenClaw to v${REQUIRED_OPENCLAW_VERSION}+ to avoid that crash.`
     );
   }
 }

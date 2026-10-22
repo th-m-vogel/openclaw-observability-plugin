@@ -634,7 +634,7 @@ export function registerHooks(
     (_event: any, ctx: any) => {
       try {
         const tel = getTelemetry();
-        logger.info(`[otel] before_model_resolve fired: hasTelemetry=${!!tel}, ctx=${JSON.stringify(ctx)}`);
+        logger.info(`[otel] before_model_resolve fired: hasTelemetry=${!!tel}, ctxKeys=${Object.keys(ctx || {}).join(",")}`);
         if (!tel) {
           logger.warn("[otel] before_model_resolve: no telemetry available");
           return undefined;

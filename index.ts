@@ -29,7 +29,7 @@
  *   }
  */
 
-import { parseConfig, policyEnablesLlmContent, type OtelObservabilityConfig } from "./src/config.js";
+import { parseConfig, policyEnablesLlmContent, resolveSignalConfig, type OtelObservabilityConfig } from "./src/config.js";
 import { initTelemetry, hasPreloadedOtelSdk, type TelemetryRuntime } from "./src/telemetry.js";
 import { initOpenLLMetry } from "./src/openllmetry.js";
 import { registerHooks } from "./src/hooks.js";
@@ -124,11 +124,31 @@ function teardownActiveRegistration(logger: any): void {
  *
  * `api.registrationMode` has existed in OpenClaw core since at least
  * 2026-07-16 — well before this plugin's own `minOpenClawVersion:
- * "2026.9.8"` floor — so there is no currently-supported host where this
+ * "2026.9.9"` floor — so there is no currently-supported host where this
  * field is genuinely absent. The `undefined` fallback below is kept anyway
  * as a free, zero-cost defensive measure, not because it's expected to
  * ever trigger.
  */
+/**
+ * Effective per-signal endpoints, honoring `signalEndpoints` overrides —
+ * `config.endpoint` alone is misleading once any signal is routed
+ * elsewhere, e.g. IONOS Cloud Observability's per-signal ingestion URLs.
+ * Shared by the RPC status endpoint, CLI `otel` command, start()'s log
+ * line, and the `otel_status` agent tool, so all four report the same
+ * thing an operator would see in traces/metrics/logs.
+ */
+function resolveEffectiveEndpoints(config: OtelObservabilityConfig): {
+  traces: string;
+  metrics: string;
+  logs: string;
+} {
+  return {
+    traces: resolveSignalConfig(config, "traces").endpoint,
+    metrics: resolveSignalConfig(config, "metrics").endpoint,
+    logs: resolveSignalConfig(config, "logs").endpoint,
+  };
+}
+
 function isNonFullRegistration(api: { registrationMode?: string }): boolean {
   if (api.registrationMode !== undefined && api.registrationMode !== "full") {
     return true;
@@ -295,6 +315,7 @@ const otelObservabilityPlugin = {
           initialized: telemetry !== null,
           config: {
             endpoint: config.endpoint,
+            effectiveEndpoints: resolveEffectiveEndpoints(config),
             protocol: config.protocol,
             serviceName: config.serviceName,
             traces: config.traces,
@@ -314,14 +335,15 @@ const otelObservabilityPlugin = {
           .command("otel")
           .description("OpenTelemetry observability status")
           .action(async () => {
+            const effective = resolveEffectiveEndpoints(config);
             console.log("🔭 OpenTelemetry Observability Plugin");
             console.log("─".repeat(40));
-            console.log(`  Endpoint:        ${config.endpoint}`);
+            console.log(`  Endpoint:        ${config.endpoint} (shared default; see per-signal below if overridden)`);
             console.log(`  Protocol:        ${config.protocol}`);
             console.log(`  Service:         ${config.serviceName}`);
-            console.log(`  Traces:          ${config.traces ? "✅" : "❌"}`);
-            console.log(`  Metrics:         ${config.metrics ? "✅" : "❌"}`);
-            console.log(`  Logs:            ${config.logs ? "✅" : "❌"}`);
+            console.log(`  Traces:          ${config.traces ? "✅" : "❌"} → ${effective.traces}`);
+            console.log(`  Metrics:         ${config.metrics ? "✅" : "❌"} → ${effective.metrics}`);
+            console.log(`  Logs:            ${config.logs ? "✅" : "❌"} → ${effective.logs}`);
             const policy = config.captureContent;
             const onFlags = (Object.keys(policy) as Array<keyof typeof policy>)
               .filter((k) => policy[k]);
@@ -428,11 +450,15 @@ const otelObservabilityPlugin = {
           await initOpenLLMetry(config, logger);
         }
 
+        const effectiveEndpoints = resolveEffectiveEndpoints(config);
         logger.info("[otel] ✅ Observability pipeline active (gateway-side)");
         logger.info(
           `[otel]   Traces=${config.traces} Metrics=${config.metrics} Logs=${config.logs}`
         );
-        logger.info(`[otel]   Endpoint=${config.endpoint} (${config.protocol})`);
+        logger.info(`[otel]   Endpoint=${config.endpoint} (${config.protocol}, shared default)`);
+        logger.info(
+          `[otel]   Effective endpoints: traces=${effectiveEndpoints.traces} metrics=${effectiveEndpoints.metrics} logs=${effectiveEndpoints.logs}`
+        );
       },
 
       stop: async () => {
@@ -494,6 +520,7 @@ const otelObservabilityPlugin = {
           const status = {
             initialized: telemetry !== null,
             endpoint: config.endpoint,
+            effectiveEndpoints: resolveEffectiveEndpoints(config),
             protocol: config.protocol,
             serviceName: config.serviceName,
             traces: config.traces,
