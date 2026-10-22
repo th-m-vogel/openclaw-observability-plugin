@@ -241,6 +241,8 @@ fetch spans, samplingRatio:1
 | sort start_time desc
 ```
 
+Replace `"agent:main:main"` with your own session key — `main` here is just this example's agent id, not a fixed or implicit value. Your installation's agent id comes from `agents.entries.<agentId>` in `openclaw.json`, set at onboarding and renameable later; if you haven't renamed it from OpenClaw's setup-wizard default, it probably is `main`, but don't assume — check your config, or pull a real session key from a recent span instead of guessing.
+
 ## Semantic Conventions
 
 The plugin follows [OpenTelemetry GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) for token-related attributes (`gen_ai.usage.*`, `gen_ai.response.model`). Custom OpenClaw attributes use the `openclaw.*` namespace.

@@ -62,6 +62,8 @@ Plugin entry configuration.
 
 `collapseEphemeralSessions` recognizes two session-key shapes commonly produced by recurring background work: a trailing per-run identifier after `:run:` (e.g. a cron job's per-run session key), and a trailing per-run identifier after an underscore (e.g. an internal-session-effect turn's key). When enabled, metrics for a matching session key are labeled with the stable part only, instead of a fresh identifier every run — so a "tokens by session" dashboard panel shows one row per job instead of one row per run. Traces and logs are unaffected and always carry the full, per-run session key for drill-down. Default `false`: existing dashboards keep working unmodified unless you opt in.
 
+> **`main` below is a placeholder, not a special value.** `agent:main:...` is only an example session key — `main` is whatever agent id your `openclaw.json` happens to use (`agents.entries.<agentId>`), chosen at setup and renameable later. OpenClaw's setup wizard commonly defaults the first agent to the id `main`, which is why examples throughout this project's docs use it, but nothing in this plugin's code — or in the rules below — treats that string as literal or implicit. The matching rules operate purely on the trailing suffix shape; whatever precedes it (agent id, channel, job id) is left untouched regardless of what it says.
+
 **Exact rules implemented** (`src/metric-session-key.ts`), checked in this order, first match wins — everything else in the key before the matched suffix is left untouched:
 
 1. **A trailing `:run:<uuid>` is stripped**, where `<uuid>` is a standard 8-4-4-4-12 hex UUID (case-insensitive). This is the shape a recurring cron job's per-run session key carries.
