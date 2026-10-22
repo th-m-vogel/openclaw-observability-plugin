@@ -116,6 +116,7 @@ Works with any OTLP-compatible backend:
 ## Documentation
 
 - [Getting Started](getting-started.md) — Setup in 5 minutes
+- [Glossary](glossary.md) — Acronyms and jargon used throughout these docs
 - [Configuration](configuration.md) — All options explained
 - [Architecture](architecture.md) — How it works
 - [Limitations](limitations.md) — Known constraints

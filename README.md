@@ -118,7 +118,7 @@ This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plu
    ```
    Send a message, then check your backend for an `openclaw.request` span with at least one `openclaw.agent.turn` child. (If you set `traces` to `false`, check for the `openclaw.llm.requests` metric instead — it appears after the next metrics export, every 30s by default.)
 
-Full walkthrough, every config option, and backend-specific examples (Dynatrace, Grafana Cloud, generic OTLP collector): [Getting Started](./docs/getting-started.md), [Configuration](./docs/configuration.md), [Backends](./docs/backends/index.md).
+Full walkthrough, every config option, and backend-specific examples (Dynatrace, Grafana Cloud, generic OTLP collector): [Getting Started](./docs/getting-started.md), [Configuration](./docs/configuration.md), [Backends](./docs/backends/index.md). New to the acronyms used throughout (OTLP, GenAI semconv, DQL, ESM/CJS, etc.)? See the [Glossary](./docs/glossary.md).
 
 ## Known limitations
 
