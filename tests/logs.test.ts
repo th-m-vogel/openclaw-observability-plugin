@@ -126,6 +126,18 @@ describe("log pipeline initialization (ISI-930)", () => {
 });
 
 describe("log filtering/exclusion (ISI-930)", () => {
+  it("excludes every log when logConfig.enabled is false (ISI-9800: was parsed but never enforced)", () => {
+    const config: LogPipelineConfig = {
+      enabled: false,
+      filters: [],
+      excludeLevels: [],
+      excludeLoggers: [],
+      excludeMessagePatterns: [],
+    };
+
+    expect(shouldExclude(createLogEvent({ level: "error", message: "anything" }), config)).toBe(true);
+  });
+
   it("excludes logs matching excluded levels", () => {
     const config: LogPipelineConfig = {
       enabled: true,
