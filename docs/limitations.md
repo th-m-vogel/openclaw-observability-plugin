@@ -129,7 +129,24 @@ A related, separate defect — `model.usage` occasionally double-firing for the 
 
 **A broader, related gap: OpenClaw's built-in `openclaw` system/custodian agent emits almost no telemetry at all, not just missing cost.** Turns running under this agent (`agentId: "openclaw"`, sessions namespaced `agent:openclaw:openclaw-<uuid>`, the agent backing system setup/config/doctor-style operations — not a user-facing conversation) appear to produce no mid/end-of-turn instrumentation beyond the initial `before_model_resolve` hook and the resulting agent-turn span: no `model_call_started`, no tool-call spans, no `model.usage`, no `agent_end`. Unlike the gaps above, tokens don't arrive correctly either here — the entire post-`before_model_resolve` pipeline appears silent for this agent. Tracked as [openclaw/openclaw#169158](https://github.com/openclaw/openclaw/issues/169158). Core's own triage has independently confirmed the narrower claim (missing `model.usage` settlement for this agent) but flagged the broader "every downstream hook is silent" claim as needing a live reproduction before fully crediting it — treat the full extent of this one as not yet fully confirmed. Low practical impact either way: this affects observability into OpenClaw's own internal setup/maintenance operations, not visibility into real conversational usage or cost.
 
-**Custom/self-hosted OpenAI-compatible providers always report `costUsd: undefined`**, tokens unaffected. This is structural, not a bug: the OpenAI Chat Completions API spec has no cost field at all, ever, only a token-count `usage` object. `costUsd` can only exist when OpenClaw core has its own price-per-token table for a given model, which it maintains for known first-party providers but not for arbitrary custom/self-hosted endpoints. No fix is possible on the plugin side for this one.
+**`costUsd` can be missing even for mainstream, first-party-hosted providers** — this is wider than it first looks, and worth separating into two genuinely different causes.
+
+**Structural case: custom/self-hosted OpenAI-compatible endpoints.** These always report `costUsd: undefined`, tokens unaffected. No fix is possible, on the plugin side or otherwise: the OpenAI Chat Completions API spec has no cost field at all, ever, only a token-count `usage` object. There is nothing for OpenClaw core to resolve a price from.
+
+**Catalog-coverage case: any other provider, including well-known hosted ones.** `costUsd` for a normal, non-custom model call depends entirely on OpenClaw core resolving a per-token price for that exact model ID — and core has **no bundled, maintained price table of its own**. It resolves pricing at runtime from a set of external, independently-maintained third-party aggregators (OpenCode/models.dev's catalog, OpenRouter, Venice, Chutes, Cerebras, DeepInfra, and LiteLLM's community-maintained pricing JSON on GitHub — see `model-catalog-pricing.ts` in OpenClaw core). If a model's exact ID isn't currently listed with pricing in any of those, cost silently comes back `undefined` — tokens are unaffected, since those come from a separate event entirely. Confirmed live: Google's Gemini models (`gemini-3.1-pro-preview` specifically, a brand-name hosted provider, not a custom endpoint) had no auto-resolved cost on a real gateway, because that model ID wasn't yet carried by any of the aggregators core queries. Preview/newly-released model IDs are the likeliest to hit this; well-established ones (e.g. most Anthropic/OpenAI model IDs) are usually covered.
+
+**Fix (this one has one): define the model's cost manually.** Add the model under `models.providers.<provider>.models[]` in `openclaw.json` with an explicit `cost` object — `input`/`output`/`cacheRead`/`cacheWrite`, each a USD rate per million tokens — and OpenClaw core resolves pricing from that instead of the external catalogs. For a provider with context-length-tiered pricing (Gemini's real-world pricing roughly doubles past a 200K-token prompt), core also supports a `tieredPricing` array alongside the flat rates:
+
+```json
+"cost": {
+  "input": 2, "output": 12, "cacheRead": 0.2, "cacheWrite": 0,
+  "tieredPricing": [
+    { "input": 4, "output": 18, "cacheRead": 0.4, "cacheWrite": 0, "range": [200000] }
+  ]
+}
+```
+
+This is a real, fully-implemented OpenClaw core schema field, not a Google-specific or provider-specific invention — confirmed directly in the installed package's cost-resolution code (`usage-cost-*.mjs`'s `selectPricingRates`): tiers are sorted by `range[0]`, and the tier whose range contains the call's total `input + cacheRead + cacheWrite` token count is selected and used for that call's pricing, independent of provider. `range` takes one or two numbers (`[start]` for an open-ended top tier, `[start, end]` for a bounded one); the base `cost` object above acts as the first/lowest tier. Once defined this way, this plugin (which only relays whatever `costUsd` core resolves and attaches no pricing logic of its own) reports it correctly — the fix lives entirely in `openclaw.json`'s model definition, not in this repo.
 
 ---
 
