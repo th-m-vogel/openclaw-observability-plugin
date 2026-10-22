@@ -91,7 +91,7 @@
       "6": {
         "type": "data",
         "title": "Token Usage by Model & Type",
-        "query": "timeseries token_usage = sum(gen_ai.client.token.usage), by:{gen_ai.token.type, gen_ai.request.model}, interval:10m",
+        "query": "timeseries token_usage = sum(gen_ai.client.token.usage), by:{gen_ai.token.type, gen_ai.response.model}, interval:10m",
         "visualization": "areaChart",
         "visualizationSettings": {
           "chartSettings": {

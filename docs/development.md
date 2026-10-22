@@ -9,12 +9,29 @@ How to develop, test, and contribute to the plugin.
 git clone https://github.com/th-m-vogel/openclaw-observability-plugin.git
 cd openclaw-observability-plugin
 
-# Install dependencies
-npm install
+# Install dependencies and build (the gateway loads the compiled dist/, see below)
+npm ci
+npm run build
+```
 
-# Link to OpenClaw (live development)
-openclaw plugins install -l .
+Then point OpenClaw at your working copy the same way every other doc does — via `plugins.load.paths` in `~/.openclaw/openclaw.json` (see [Getting Started](getting-started.md#step-3-configure-openclaw) for the full entry, including the required `hooks.allowConversationAccess`):
 
+```json
+{
+  "plugins": {
+    "load": { "paths": ["/path/to/openclaw-observability-plugin"] },
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": { "endpoint": "http://localhost:4318" }
+      }
+    }
+  }
+}
+```
+
+```bash
 # Restart gateway to pick up the plugin
 openclaw gateway restart
 ```
@@ -23,14 +40,29 @@ openclaw gateway restart
 
 ```
 openclaw-observability-plugin/
-├── index.ts                    # Plugin entry point
+├── index.ts                    # Plugin entry point (register/start/stop, RPC, CLI, agent tool)
 ├── src/
-│   ├── config.ts               # Configuration parsing
+│   ├── config.ts               # Configuration parsing and defaults
 │   ├── telemetry.ts            # OTel SDK setup (providers, exporters, instruments)
+│   ├── hooks.ts                # Typed + event-stream hook handlers (spans, most metrics)
+│   ├── diagnostics.ts          # Diagnostic-event listener (per-call tokens, cost, gateway/queue/session metrics)
+│   ├── logs.ts                 # OTLP log pipeline, gateway-logger bridge, logConfig filtering
+│   ├── security.ts             # Security detections (sensitive files, prompt injection, dangerous commands)
+│   ├── semconv.ts              # Attribute/metric name constants, schema versions
+│   ├── trace-context-store.ts  # Session → span-context store used for parenting
+│   ├── propagation.ts          # W3C trace context inject/extract helpers
+│   ├── metric-session-key.ts   # collapseEphemeralSessions label transform
+│   ├── metric-by-model.ts      # enableByModelMetrics attribute stripping
+│   ├── grpc-metadata.ts        # headers → gRPC metadata conversion
 │   ├── openllmetry.ts          # GenAI instrumentation status check
-│   └── hooks.ts                # OpenClaw event hooks
+│   └── version.ts              # Plugin version resolution from openclaw.plugin.json
+├── instrumentation/
+│   ├── preload.mjs             # Optional NODE_OPTIONS preload (Traceloop LLM-client spans)
+│   └── capture-content.mjs     # Content-capture env-var resolution used by the preload
+├── tests/                      # Vitest suite
 ├── collector/
 │   └── otel-collector-config.yaml  # OTel Collector config
+├── dynatrace/                  # Dynatrace dashboards and DQL examples
 ├── docs/                       # MkDocs documentation
 ├── openclaw.plugin.json        # Plugin manifest
 ├── package.json
@@ -45,11 +77,12 @@ openclaw-observability-plugin/
 
 Edit the TypeScript files in `src/` or `index.ts`.
 
-### 2. Restart Gateway
+### 2. Rebuild and Restart Gateway
 
-OpenClaw uses [jiti](https://github.com/unjs/jiti) to load TypeScript at runtime, so no build step is needed:
+The gateway loads the compiled `dist/index.js` (the `openclaw.runtimeExtensions` entry in `package.json`), not the TypeScript source, so rebuild after every change:
 
 ```bash
+npm run build
 openclaw gateway restart
 ```
 
@@ -74,11 +107,14 @@ docker compose logs -f otel-collector
 
 Every exported span/metric will appear in the collector logs.
 
-## Type Checking
+## Type Checking and Tests
 
 ```bash
 npm run typecheck
+npm test
 ```
+
+CI runs `npm run typecheck`, `npm run build`, and `npm test`.
 
 !!! note
     The plugin uses OpenClaw's plugin API via `any` types since the SDK types aren't published separately yet. Once `openclaw/plugin-sdk` is published, we'll add proper type imports.
@@ -117,7 +153,7 @@ You can run with just the debug exporter (no Dynatrace/Grafana needed):
     }),
     ```
 
-2. Record values in `src/hooks.ts` or `index.ts`:
+2. Record values in `src/hooks.ts` (hook-sourced) or `src/diagnostics.ts` (diagnostic-event-sourced):
 
     ```typescript
     telemetry.counters.myNewMetric.add(1, { "attribute.key": "value" });
@@ -178,7 +214,7 @@ Users install by cloning the repo at that tag and loading it by path — see [RE
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/my-feature`
 3. Make your changes
-4. Run type-check: `npm run typecheck`
+4. Run the checks CI runs: `npm run typecheck`, `npm run build`, and `npm test` (see [`CONTRIBUTING.md`](../CONTRIBUTING.md))
 5. Test with a local collector
 6. Submit a pull request
 

@@ -3,9 +3,9 @@
 The `captureContent` plugin option controls whether prompt, completion, and tool content text is recorded on spans. It accepts either:
 
 - a **single boolean** — `true` turns every category on, `false` turns every category off (legacy shape), or
-- a granular **`ContentCapturePolicy`** object with the per-category flags `inputMessages`, `outputMessages`, `toolInputs`, `toolOutputs`, `systemPrompt` (ISI-1000).
+- a granular **`ContentCapturePolicy`** object with the per-category flags `inputMessages`, `outputMessages`, `toolInputs`, `toolOutputs`, `toolErrorMessages`, `systemPrompt` (ISI-1000; `toolErrorMessages` added in 0.7.0).
 
-Default: every flag is `false` (privacy-first).
+Default: with `captureContent` omitted or `false`, every flag is off (privacy-first). **One exception once you use the object form:** `toolErrorMessages` defaults to **on** whenever `captureContent` is an object, even an object that only names other flags — see [`toolErrorMessages`](#toolerrormessages-defaults-on-in-object-form) below.
 
 ## What `captureContent` controls
 
@@ -36,7 +36,22 @@ Each policy flag also gates one or more `openclaw.content.*` attributes on the p
 | `outputMessages` | `openclaw.content.output_message` on `openclaw.message.sent` | Outbound assistant reply text |
 | `toolInputs` | `openclaw.content.tool_input` on `execute_tool <tool>` | Full tool-call input arguments (JSON-stringified) |
 | `toolOutputs` | `openclaw.content.tool_output` on `execute_tool <tool>` | Tool-call result text (text parts only) |
+| `toolErrorMessages` | `openclaw.tool.error_preview` on `execute_tool <tool>` (failed tool calls only) | Error text of a failed tool call, redacted, then capped at 1024 characters |
 | `systemPrompt` | `openclaw.content.system_prompt` on `openclaw.agent.turn` | System prompt text |
+
+### `toolErrorMessages` defaults on in object form
+
+`toolErrorMessages` is the one flag whose default depends on which form `captureContent` takes, because error text is treated as operational data rather than conversation content:
+
+| `captureContent` value | `toolErrorMessages` |
+|------------------------|---------------------|
+| omitted | off |
+| `false` | off |
+| `true` | on |
+| any object that doesn't name it, e.g. `{ "toolInputs": true }` or even `{}` | **on** |
+| object with `"toolErrorMessages": false` | off |
+
+So switching from `false` to a narrow object like `{ "toolInputs": true }` also starts exporting tool error previews. Tool errors can still contain sensitive data — a failed command's stderr, a path, a fragment of a file — and redaction is best-effort pattern matching. If you don't want that, set `"toolErrorMessages": false` explicitly. This flag is not part of the Traceloop derivation above; it only affects the plugin's own tool spans.
 
 **GenAI mirrors (ISI-1605, schema 1.4.0).** The same flags also gate a
 parallel set of `gen_ai.*` / `traceloop.*` keys aligned to Dynatrace AI
@@ -152,7 +167,8 @@ Whenever a flag is `true`, the following can land in span storage:
 - `inputMessages` / `systemPrompt`: user chat input (including PII, credentials, proprietary data), document contents summarized into prompts, system prompts that may encode prompt-engineering IP.
 - `outputMessages`: assistant replies, which can mirror or reveal sensitive input data.
 - `toolInputs`: tool-call arguments — file paths, command lines, query strings, API request bodies. Note that even with `toolInputs: false`, the smaller `openclaw.tool.input_preview` attribute is still emitted.
-- `toolOutputs`: tool-call results fed back to the model — file contents from `tool.Read`, shell command output, database query results.
+- `toolOutputs`: tool-call results fed back to the model — file contents from a `Read` tool call (`execute_tool Read`), shell command output, database query results.
+- `toolErrorMessages`: up to 1024 characters of a failed tool call's error text — which can quote paths, command output, or file fragments. On by default whenever `captureContent` is an object (see above).
 
 The plugin's **own** hook-surface content attributes — every `openclaw.content.*` value **and** the `gen_ai.*` mirrors (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, and the `*_filter_results` keys) — are passed through the plugin's secret-redaction funnel (`redactSensitiveText` → `setRedactedAttribute`) **before** truncation, so known credential shapes (API keys, bearer/basic tokens, JWTs, AWS keys, emails) are scrubbed. Redaction is best-effort pattern matching, not a guarantee against all PII.
 
@@ -162,7 +178,7 @@ The plugin does **not** scrub **Traceloop**-emitted `gen_ai.prompt.*.content` / 
 
 Whether or not you capture content, the real-time [detection module](./detection.md) runs on the hook-surface path and flags:
 
-- Sensitive file access (`tool.Read` on `.env`, SSH keys, cloud creds)
+- Sensitive file access (a `Read`/`Write`/`Edit` tool call on `.env`, SSH keys, cloud creds)
 - Dangerous command execution
 - Prompt-injection patterns on inbound messages
 

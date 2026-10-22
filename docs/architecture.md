@@ -237,18 +237,26 @@ Gateway Agent Loop              Custom Plugin
      │                               │      update llm.requests/.duration
      │                               │      (per-call metrics, 0.11.0+)
      │                               │
-     │  on("tool_result_persist")    │
-     │ ─────────────────────────────>│  ──> create TOOL span
-     │  (called for each tool)       │      (child of agent turn)
+     │  on("before_tool_call")       │
+     │ ─────────────────────────────>│  ──> open "execute_tool {name}" span
+     │  (once per tool call)         │      (child of agent turn)
+     │                               │
+     │  on("after_tool_call")        │
+     │ ─────────────────────────────>│  ──> close tool span, record
+     │                               │      openclaw.tool.calls/.duration
+     │                               │      (tool_result_persist enriches the
+     │                               │      span, or creates + ends one itself
+     │                               │      if before_tool_call never fired)
      │                               │
      │  on("agent_end")              │
      │ ─────────────────────────────>│  ──> end agent turn span
      │                               │      end root span
-     │                               │      extract tokens from messages,
-     │                               │      enrich turn span + token-count
-     │                               │      fallback metrics if model.usage
-     │                               │      never fired this turn
+     │                               │      enrich turn span with token
+     │                               │      usage (span attributes only —
+     │                               │      no token metrics recorded here)
 ```
+
+Token and cost **metrics** don't come from these hooks at all — they come from OpenClaw's diagnostic-event stream, see [Data Flow Comparison](#data-flow-comparison) below.
 
 ### Trace Context Propagation
 
@@ -271,7 +279,7 @@ When creating child spans, it uses the stored context:
 ```typescript
 // Tool span becomes child of agent turn
 const span = tracer.startSpan(
-  `tool.${toolName}`,
+  spanNameExecuteTool(toolName),   // "execute_tool <toolName>"
   { kind: SpanKind.INTERNAL },
   sessionCtx.agentContext  // <-- parent context
 );
@@ -341,6 +349,9 @@ openclaw.llm.tokens.completion   # counter, per real call (0.11.0+)
 openclaw.llm.cost.usd            # counter, per agent turn (still turn-level only — no per-call cost field exists anywhere in OpenClaw's plugin API), by gen_ai.response.model
 openclaw.tool.calls              # counter
 openclaw.session.resets          # counter
+... plus tool, skill, failover, session, queue, webhook, cron, sub-agent,
+    compaction, gateway-health, memory, and security metrics — see the
+    metrics reference for the full list
 ```
 
 The OTel-stable `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` are recorded as **span attributes** on both the per-call `chat {model}` span and the aggregated `openclaw.agent.turn` span (see the trace structure above), in addition to the per-call counters above.
@@ -371,42 +382,39 @@ The OTel-stable `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` are r
 
 ### Custom Plugin: Token Tracking
 
-**0.11.0+** — two separate paths, split by what's exclusively available on each. Tokens/cost stayed on the turn-level path; only request count and duration moved to the per-call one (see `docs/telemetry/metrics.md` for why the obvious-looking alternative — moving tokens there too — doesn't work: `model_call_ended`'s real event carries no usage data at all).
+**0.11.0+** — three separate sources, split by what's exclusively available on each. Request count and duration come from the per-call hook pair; per-call token counts come from per-call *diagnostic events* (a different mechanism — the hook pair itself carries no usage data); cost is still turn-level only, because no per-call cost field exists anywhere in OpenClaw's plugin API.
 
 ```
-Per real model call (openclaw.llm.requests / .duration / .errors only):
+Per real model call, via hooks (openclaw.llm.requests / .errors / .duration,
+gen_ai.client.operation.duration):
 1. Agent calls LLM via pi-ai
 2. Gateway fires model_call_started → plugin opens a "chat {model}" span,
    stashes provider/agentId on the session's active context
-3. pi-ai returns response with .usage (but this is NOT what model_call_ended
-   receives — see step 4)
-4. Gateway fires model_call_ended with sanitized call metadata only: timing,
+3. Gateway fires model_call_ended with sanitized call metadata only: timing,
    outcome, provider/model, bounded request-id hashes — no usage field
-5. Plugin closes the span (no usage attributes to add — none are available)
-   and records request-count/duration metrics (0.11.0+, new — previously
-   this step only touched the span, and didn't record metrics at all)
-6. Batches and exports via OTLP
+4. Plugin closes the span and records request-count/error/duration metrics
 
-Per agent turn (openclaw.llm.tokens.* and .cost.usd — unchanged since before
-0.11.0, still the only source for either):
+Per real model call, via diagnostic events (openclaw.llm.tokens.*,
+gen_ai.client.token.usage) — requires OpenClaw v2026.9.8+:
+1. Gateway emits a "model.call.completed" (or "model.call.error") diagnostic
+   event for the call, carrying that call's own usage
+   (input/output/cacheRead/cacheWrite/total)
+2. Plugin records the token counters/histogram once per call. Core guards
+   this emission per call itself, so no plugin-side dedup is needed here
+
+Per agent turn, via diagnostic events (openclaw.llm.cost.usd only):
 1. Gateway fires the "model.usage" diagnostic event once per turn (summing
-   however many of the per-call cycles above happened in it, e.g. several in
-   a tool-use loop) — this is the one place token counts and cost appear at
-   all; neither is ever on model_call_started/model_call_ended
-2. Plugin dedup-checks it against openclaw/openclaw#166289 (core is known to
-   double-dispatch this event for a subset of calls, 0.11.0+) and records
-   tokens/cost if new
-3. Gateway also fires agent_end with the turn's messages (incl. .usage) —
-   plugin uses this to enrich the agent-turn span's attributes, and (0.11.0+,
-   same label schema as step 2 now) as a token-count fallback for turns
-   where model.usage never fired at all
+   however many real calls happened in it) — the only place cost appears
+2. Plugin dedup-checks it against openclaw/openclaw#166289 (a duplicate
+   dispatch of this event) and records cost if new
+
+Span enrichment only (no metrics):
+- agent_end carries the turn's messages; the plugin uses usage from the
+  turn's model.usage event (or, failing that, the messages' own .usage) to
+  set gen_ai.usage.* attributes on the openclaw.agent.turn span
 ```
 
-Before 0.11.0, step 5 of the per-call path only set span attributes and
-recorded nothing; the agent-turn fallback in step 3 used a different,
-disjoint label schema (no `gen_ai.conversation.id`) than step 2's primary
-path. Both are fixed now — see `docs/telemetry/metrics.md` for the full
-before/after.
+Before 0.11.0, tokens were recorded once per turn from `model.usage`, with an `agent_end` fallback that used a different, disjoint label schema (no `gen_ai.conversation.id`). That fallback was removed once tokens moved to the per-call diagnostic events — see `docs/telemetry/metrics.md` and `CHANGELOG.md` for the full before/after.
 
 ---
 
@@ -492,8 +500,23 @@ The constants that exported the removed keys
 - Compute totals as `gen_ai.usage.input_tokens +
   gen_ai.usage.output_tokens` — `gen_ai.usage.total_tokens` is gone.
 
-The resource attribute `openclaw.schema.version` now carries `1.3.0` on
-every signal so consumers can gate queries on the schema cut-over.
+The resource attribute `openclaw.schema.version` carried `1.3.0` on
+every signal from this cut-over onward, so consumers can gate queries on it.
+
+### Current schema version
+
+`openclaw.schema.version` is currently **`1.5.0`** (see
+`OPENCLAW_SCHEMA_VERSION` in `src/semconv.ts`). Both bumps since `1.3.0`
+were additive only — no key removed or renamed:
+
+- `1.4.0` (ISI-1605, shipped in 0.8.0) — opt-in GenAI content-capture keys
+  (`gen_ai.input.messages`, `gen_ai.output.messages`,
+  `gen_ai.system_instructions`, the `*_filter_results` keys) plus
+  `traceloop.span.kind`.
+- `1.5.0` (ISI-1627 / ISI-1628, shipped in 0.8.0) —
+  `openclaw.subagent.run_id` and `gen_ai.request.model`/`gen_ai.provider.name`
+  on the sub-agent spawn span; the `openclaw.compaction.*` span attributes and
+  the `openclaw.compaction.count`/`.tokens_reclaimed` metrics.
 
 ### Resource identity (ISI-995)
 
@@ -503,9 +526,12 @@ The trace, metric, and log Resources all carry:
   `version` field — the legacy hard-coded `"0.1.0"` placeholder is gone,
   so version-comparison dashboards now see real plugin releases.
 - An OTel semconv `schema_url` (currently
-  `https://opentelemetry.io/schemas/1.39.0`, pinned to the installed
-  `@opentelemetry/semantic-conventions` version) so backends can resolve
-  attribute names against the right registry generation.
+  `https://opentelemetry.io/schemas/1.43.0`, pinned to the installed
+  `@opentelemetry/semantic-conventions` version — `tests/version.test.ts`
+  fails if the two drift apart) so backends can resolve attribute names
+  against the right registry generation.
+- `openclaw.schema.version` — the plugin's own attribute-schema version
+  (see [Current schema version](#current-schema-version)).
 
 ### Log-attribute hygiene (ISI-995)
 
@@ -528,10 +554,10 @@ double-records.
 
 ### Batching
 
-Both plugins use batched export:
-- **Traces:** BatchSpanProcessor (default 5s or 512 spans)
-- **Metrics:** PeriodicExportingMetricReader (default 60s)
-- **Logs:** BatchLogRecordProcessor (default 5s)
+This plugin uses batched export:
+- **Traces:** BatchSpanProcessor (OTel SDK defaults: 5s or 512 spans)
+- **Metrics:** PeriodicExportingMetricReader, every `metricsIntervalMs` (default 30s)
+- **Logs:** BatchLogRecordProcessor (5s, up to 512 records per batch)
 
 ### Overhead
 
@@ -544,29 +570,36 @@ Both are lightweight — the OTel SDK handles batching efficiently.
 
 ### Sampling
 
-Reduce trace volume with `sampleRate`:
+Reduce trace volume with `sampleRate` in this plugin's config — `0.1` keeps 10% of traces:
 
 ```json
 {
-  "diagnostics": {
-    "otel": {
-      "sampleRate": 0.1  // 10% of traces
+  "plugins": {
+    "entries": {
+      "otel-observability": {
+        "config": {
+          "sampleRate": 0.1
+        }
+      }
     }
   }
 }
 ```
 
+See [Configuration → Trace Sampling](configuration.md#trace-sampling) for the exact semantics.
+
 ---
 
 ## When to Use Each
 
-| Use Case | Recommended |
-|----------|-------------|
-| Production monitoring | Official |
-| Cost/token dashboards | Official |
-| Gateway health alerts | Official |
+| Use Case | Better fit |
+|----------|------------|
+| Minimal setup, config only, no install | Official |
+| Forwarding all gateway logs | Official |
+| Per-call token metrics, per-conversation cost/token dashboards | Custom |
+| Gateway health (queues, sessions, event loop, memory) | Either — both emit these |
 | Debugging specific requests | Custom |
 | Understanding agent behavior | Custom |
 | Tool execution analysis | Custom |
 
-**Don't run both at once.** Both plugins initialize their own OTel SDK instance against the same process — running them together risks double-registered global providers and duplicate/conflicting export, not "complete observability." Pick one; see `docs/limitations.md` and `docs/index.md` for the full reasoning. This table previously recommended running both for "complete observability" — that guidance was wrong and has been corrected here to match the rest of this plugin's docs.
+**Don't run both at once.** Both plugins initialize their own OTel SDK instance against the same process — running them together risks double-registered global providers and duplicate/conflicting export, not "complete observability." Pick one; see `docs/limitations.md` and `docs/index.md` for the full reasoning.

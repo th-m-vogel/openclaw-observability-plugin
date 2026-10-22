@@ -14,9 +14,10 @@ openclaw.request (SERVER span — full message lifecycle)
 │   ├── gen_ai.usage.input_tokens: 4521
 │   ├── gen_ai.usage.output_tokens: 892
 │   ├── gen_ai.response.model: claude-opus-4-5
-│   ├── tool.exec (INTERNAL — 156ms)
-│   ├── tool.Read (INTERNAL — 12ms)
-│   └── tool.web_fetch (INTERNAL — 1200ms)
+│   ├── chat claude-opus-4-5 (CLIENT — one per real model call)
+│   ├── execute_tool exec (INTERNAL — 156ms)
+│   ├── execute_tool Read (INTERNAL — 12ms)
+│   └── execute_tool web_fetch (INTERNAL — 1200ms)
 ├── openclaw.compaction (INTERNAL — if context is compacted)
 └── openclaw.command.new (INTERNAL — if session reset)
 ```

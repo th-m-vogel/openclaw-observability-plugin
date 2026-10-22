@@ -1,6 +1,8 @@
 # Metrics Reference
 
-All metrics use the `openclaw.*` namespace and are exported via OTLP at the configured interval (default: 30 seconds).
+Metrics use the `openclaw.*` namespace — plus the two stable OTel GenAI histograms `gen_ai.client.token.usage` and `gen_ai.client.operation.duration` — and are exported via OTLP every `metricsIntervalMs` (default: 30 seconds).
+
+A metric only appears in your backend once something has recorded a value to it, so event-driven metrics (webhooks, cron, failover, memory pressure, ...) stay absent until the matching OpenClaw event actually fires. A core set of counters (LLM requests/errors/tokens, tool calls/errors, messages, session resets, security) is kept alive with a zero-value data point every export interval, carrying the attribute `openclaw.idle=true` — filter that out (or ignore it, since it adds 0) in queries that group by attribute.
 
 > This page covers metrics emitted by **this plugin** only. For OpenClaw core's own first-party metric catalog (emitted by the official `diagnostics-otel` plugin — see [index](../index.md) for how the two relate), the authoritative reference is [OpenClaw core: Model calls and exported metrics](https://docs.openclaw.ai/gateway/opentelemetry/model-calls-and-metrics). Always check that page (or the core source directly) before assuming a field exists on a diagnostic event — see [Limitations](../limitations.md) for a real example of what happens when that isn't done.
 
@@ -40,7 +42,7 @@ The two semconv-sourced siblings live in this plugin's own `openclaw.*` namespac
 |---|---|
 | **Type** | Counter |
 | **Unit** | requests |
-| **Attributes** | `gen_ai.response.model`, `gen_ai.conversation.id`, `gen_ai.provider.name` (when known), `openclaw.provider` (legacy mirror) |
+| **Attributes** | `gen_ai.response.model`, `gen_ai.operation.name` (`chat`), `gen_ai.conversation.id`, `gen_ai.provider.name` + `openclaw.provider` (legacy mirror) when the provider is known, `gen_ai.agent.id` when known |
 | **Description** | Total number of real LLM API calls made |
 
 Tracks every call to Anthropic, OpenAI, or any other configured provider — one increment per real call, not per agent turn. Use this to understand request volume over time.
@@ -66,7 +68,7 @@ Counts failed LLM calls (rate limits, timeouts, invalid requests, etc.). A spike
 |---|---|
 | **Type** | Counter |
 | **Unit** | tokens |
-| **Attributes** | `gen_ai.response.model`, `gen_ai.conversation.id`, `gen_ai.provider.name` (when known) |
+| **Attributes** | Same as `openclaw.llm.requests` |
 | **Description** | Total tokens consumed per real model API call (prompt + completion + cache read + cache write) |
 
 The primary token-volume metric. Combine with model information to estimate costs (see `openclaw.llm.cost.usd` for the plugin's own turn-level cost figure). Unlike `openclaw.llm.cost.usd`, this metric does **not** need the plugin's own `#166289` dedup guard — it comes from `model.call.completed`/`model.call.error`, which core itself idempotency-guards per call (a one-shot `observer.state.terminalEventEmitted` flag), a structurally different and already-safe emission path from `model.usage` (the event `#166289` actually affects).
@@ -110,6 +112,43 @@ Tracks output tokens. Useful for understanding response verbosity.
 
 Latency distribution for individual LLM calls (not full agent turns — see `openclaw.agent.turn_duration` for that). Use percentiles (p50, p95, p99) to understand typical and worst-case latency.
 
+### `openclaw.llm.cost.usd`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | usd |
+| **Attributes** | `gen_ai.response.model`, `gen_ai.provider.name`, `openclaw.provider` (legacy mirror), `gen_ai.operation.name` (`invoke_agent`), `gen_ai.conversation.id` |
+| **Description** | Estimated LLM cost in USD, once per agent turn |
+
+Sourced from OpenClaw core's turn-level `model.usage` diagnostic event, the only place a cost figure exists in the plugin API — recorded only when core supplies a positive `costUsd`, and dedup-guarded against the `#166289` duplicate dispatch. Missing entirely for session types where core never emits `model.usage`, and for custom/self-hosted providers core has no price table for — see [Limitations](../limitations.md). Note the different `gen_ai.operation.name` from the per-call metrics above (`invoke_agent` vs `chat`), and no `gen_ai.agent.id`.
+
+---
+
+### `gen_ai.client.token.usage`
+
+| | |
+|---|---|
+| **Type** | Histogram (stable OTel GenAI semconv) |
+| **Unit** | `{token}` |
+| **Attributes** | Same as `openclaw.llm.requests`, plus `gen_ai.token.type` (`input`, `output`, `cache_read`, `cache_creation`) |
+| **Description** | Tokens per real model API call, one data point per token type |
+
+Same source and timing as `openclaw.llm.tokens.*` (the `model.call.completed`/`model.call.error` diagnostic events).
+
+---
+
+### `gen_ai.client.operation.duration`
+
+| | |
+|---|---|
+| **Type** | Histogram (stable OTel GenAI semconv) |
+| **Unit** | s |
+| **Attributes** | Per-call points: same as `openclaw.llm.requests` (`gen_ai.operation.name` = `chat`). Per-turn points: `gen_ai.response.model`, `gen_ai.operation.name` = `invoke_agent`, `gen_ai.agent.id`, `openclaw.agent.id` |
+| **Description** | Duration in seconds of both real model calls and whole agent turns |
+
+Recorded from two places: once per real call (`model_call_ended`, same value as `openclaw.llm.duration` in seconds) and once per agent turn (`agent_end`, same value as `openclaw.agent.turn_duration` in seconds). **Filter or group by `gen_ai.operation.name`** — mixing the two in one percentile gives a meaningless result.
+
 ### Why can't tokens/cost be per-call too?
 
 `openclaw.llm.requests`/`.duration` moved to a per-call hook in 0.11.0 because they don't need any usage data — a call either happened or it didn't, and timing is always available. `openclaw.llm.tokens.*` needed OpenClaw core to tell the plugin how many tokens a given call used; that didn't exist on the obvious-looking hook pair (`model_call_started`/`model_call_ended`, which deliberately carries no usage), but does exist, since v2026.9.8, on the separate `model.call.completed`/`model.call.error` diagnostic events, which this plugin adopted in 0.11.0. See `docs/limitations.md` for the full investigation and what's still turn-level only (cost).
@@ -133,10 +172,10 @@ Sourced from core's own `model.failover` trusted diagnostic event (same general 
 |---|---|
 | **Type** | Counter |
 | **Unit** | calls |
-| **Attributes** | `gen_ai.tool.name` |
+| **Attributes** | `gen_ai.tool.name`, `gen_ai.operation.name` (`execute_tool`), `gen_ai.conversation.id` |
 | **Description** | Total tool invocations |
 
-Broken down by tool name. Shows which tools are used most frequently.
+Broken down by tool name. Shows which tools are used most frequently. Carries the per-conversation `gen_ai.conversation.id` label, so it has the same `rate()`/`increase()` one-shot-series caveat as the LLM metrics (and no `_by_model`-style sibling yet) — see [Limitations](../limitations.md).
 
 **Example attribute values:** `exec`, `Read`, `Write`, `web_fetch`, `web_search`, `browser`, `memory_search`
 
@@ -161,10 +200,24 @@ Broken down by tool name. High error rates on specific tools may indicate config
 |---|---|
 | **Type** | Histogram |
 | **Unit** | ms |
-| **Attributes** | `gen_ai.tool.name` |
+| **Attributes** | `gen_ai.tool.name`, `gen_ai.conversation.id` |
 | **Description** | Tool execution duration in milliseconds |
 
 How long each tool takes. Useful for identifying slow tools that bottleneck agent turns.
+
+---
+
+### `openclaw.tool.approvals`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | approvals |
+| **Attributes** | `gen_ai.tool.name`, `gen_ai.conversation.id` |
+| **Description** | Tool calls that required an approval before running |
+
+Incremented when a tool call starts with an approval requirement. The approval outcome and wait time are span attributes on the tool span (`openclaw.tool.approval.resolution`, `openclaw.tool.approval.duration_ms`), not metrics.
+
 
 ### `openclaw.tool.loop`
 
@@ -198,9 +251,35 @@ Sourced from OpenClaw core's own `skill.used` trusted diagnostic event (same gen
 |---|---|
 | **Type** | Histogram |
 | **Unit** | ms |
+| **Attributes** | `gen_ai.response.model`, `gen_ai.operation.name` (`invoke_agent`), `gen_ai.agent.id`, `openclaw.agent.id` |
 | **Description** | Full agent turn duration (LLM + tools + processing) |
 
 End-to-end time for a complete agent turn. This is the user-perceived latency.
+
+---
+
+### `openclaw.agent_turns.active`
+
+| | |
+|---|---|
+| **Type** | UpDownCounter |
+| **Unit** | turns |
+| **Description** | Declared but currently never updated |
+
+The instrument is created at startup, but no code path increments or decrements it, so it never reports data. Listed here so a name seen in a metrics browser isn't mistaken for a broken pipeline.
+
+---
+
+### `openclaw.requests.active`
+
+| | |
+|---|---|
+| **Type** | UpDownCounter |
+| **Unit** | requests |
+| **Description** | Declared but currently never updated |
+
+Same as `openclaw.agent_turns.active`: created, never recorded to.
+
 
 ## Session Metrics
 
@@ -223,9 +302,166 @@ Emitted from two different call sites with two different attribute keys — grou
 |---|---|
 | **Type** | UpDownCounter |
 | **Unit** | sessions |
+| **Attributes** | `openclaw.session.channel` |
 | **Description** | Currently active sessions |
 
-A gauge-like metric showing the number of active sessions at any point in time.
+A gauge-like metric showing the number of active sessions at any point in time — incremented on `session_start`, decremented on `session_end`.
+
+---
+
+### `openclaw.session.stuck`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.session.key` |
+| **Description** | Core's `session.stuck` diagnostic event fired |
+
+---
+
+### `openclaw.session.stuck_age_ms`
+
+| | |
+|---|---|
+| **Type** | Histogram |
+| **Unit** | ms |
+| **Attributes** | `openclaw.session.key` |
+| **Description** | Age of the stuck session when `session.stuck` fired |
+
+---
+
+### `openclaw.session.long_running`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.session.key` |
+| **Description** | Core's `session.long_running` diagnostic event fired |
+
+---
+
+### `openclaw.session.stalled`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.session.key` |
+| **Description** | Core's `session.stalled` diagnostic event fired |
+
+These four carry the raw session key as a label (not collapsed by `collapseEphemeralSessions`), so they're high-cardinality by design — aggregate them away for alerting panels.
+
+## Queue Metrics
+
+All sourced from core's `queue.lane.enqueue`/`queue.lane.dequeue` diagnostic events.
+
+### `openclaw.queue.lane.enqueue`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.queue.lane` (when present) |
+| **Description** | Items added to a queue lane |
+
+---
+
+### `openclaw.queue.lane.dequeue`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.queue.lane` (when present) |
+| **Description** | Items removed from a queue lane |
+
+---
+
+### `openclaw.queue.depth`
+
+| | |
+|---|---|
+| **Type** | Histogram |
+| **Unit** | items |
+| **Attributes** | `openclaw.queue.lane` (when present) |
+| **Description** | Lane depth, sampled on every enqueue and dequeue |
+
+---
+
+### `openclaw.queue.wait_ms`
+
+| | |
+|---|---|
+| **Type** | Histogram |
+| **Unit** | ms |
+| **Attributes** | `openclaw.queue.lane` (when present) |
+| **Description** | Wait time reported on enqueue |
+
+## Gateway Health Metrics
+
+Sourced from core's `diagnostic.liveness.warning`, `diagnostic.heartbeat`, `diagnostic.memory.sample`, and `diagnostic.memory.pressure` diagnostic events. The histograms below carry no attributes.
+
+### `openclaw.liveness.warnings`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.diagnostic.phase` |
+| **Description** | Core's `diagnostic.liveness.warning` event fired |
+
+---
+
+### `openclaw.diagnostic.heartbeats`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.diagnostic.phase` |
+| **Description** | Core's `diagnostic.heartbeat` event fired |
+
+---
+
+### `openclaw.gateway.*` histograms
+
+| Metric | Unit | Recorded from |
+|---|---|---|
+| `openclaw.gateway.event_loop_delay_p99` | ms | liveness warnings |
+| `openclaw.gateway.event_loop_delay_max` | ms | liveness warnings |
+| `openclaw.gateway.event_loop_utilization` | 1 | liveness warnings |
+| `openclaw.gateway.cpu_core_ratio` | 1 | liveness warnings |
+| `openclaw.gateway.work_queued` | items | liveness warnings and heartbeats |
+
+Each is recorded only when the triggering event carries the corresponding field.
+
+---
+
+### `openclaw.memory.pressure`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | 1 |
+| **Attributes** | `openclaw.memory.reason`, `openclaw.memory.level` (each when present) |
+| **Description** | Core's `diagnostic.memory.pressure` event fired |
+
+---
+
+### `openclaw.memory.*` histograms
+
+| Metric | Unit |
+|---|---|
+| `openclaw.memory.rss_bytes` | By |
+| `openclaw.memory.heap_used_bytes` | By |
+| `openclaw.memory.heap_total_bytes` | By |
+| `openclaw.memory.external_bytes` | By |
+| `openclaw.memory.array_buffers_bytes` | By |
+
+Recorded from the memory snapshot on both `diagnostic.memory.sample` and `diagnostic.memory.pressure` events.
+
 
 ## Compaction Metrics
 
@@ -265,7 +501,7 @@ runtime reports both pre- and post-compaction token counts.
 | **Unit** | messages |
 | **Description** | Total inbound messages |
 
-Counts messages received from users across all channels.
+Counts messages received from users across all channels. Attribute: `openclaw.message.channel`.
 
 ---
 
@@ -277,7 +513,146 @@ Counts messages received from users across all channels.
 | **Unit** | messages |
 | **Description** | Total outbound messages |
 
-Counts messages sent by the agent across all channels.
+Counts messages sent by the agent across all channels. Attribute: `openclaw.message.channel`.
+
+## Webhook Metrics
+
+Sourced from the `webhook_received`, `webhook_processed`, and `webhook_error` hooks. Note the plural `webhooks` in the counter names and the singular `webhook` in the histogram names.
+
+### `openclaw.webhooks.received`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.webhook.source`, `openclaw.webhook.event_type` |
+| **Description** | Webhooks received |
+
+---
+
+### `openclaw.webhooks.processed`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.webhook.source`, `openclaw.webhook.event_type` |
+| **Description** | Webhooks processed successfully |
+
+---
+
+### `openclaw.webhooks.errors`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | errors |
+| **Attributes** | `openclaw.webhook.source`, `openclaw.webhook.event_type` |
+| **Description** | Webhook processing errors |
+
+---
+
+### `openclaw.webhook.duration`
+
+| | |
+|---|---|
+| **Type** | Histogram |
+| **Unit** | ms |
+| **Attributes** | `openclaw.webhook.source`, `openclaw.webhook.event_type` |
+| **Description** | Webhook processing duration (recorded on success and on error) |
+
+---
+
+### `openclaw.webhook.payload_size`
+
+| | |
+|---|---|
+| **Type** | Histogram |
+| **Unit** | bytes |
+| **Attributes** | `openclaw.webhook.source` |
+| **Description** | Size of a received webhook payload, when reported |
+
+## Cron Metrics
+
+Sourced from the `cron_changed` and `cron_executed` hooks.
+
+### `openclaw.cron.changes`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.cron.job_name`, `openclaw.cron.action` |
+| **Description** | Cron job definition changes |
+
+---
+
+### `openclaw.cron.executions`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.cron.job_name`, `openclaw.cron.trigger` |
+| **Description** | Cron job runs |
+
+---
+
+### `openclaw.cron.errors`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | errors |
+| **Attributes** | `openclaw.cron.job_name` |
+| **Description** | Failed cron job runs |
+
+---
+
+### `openclaw.cron.duration`
+
+| | |
+|---|---|
+| **Type** | Histogram |
+| **Unit** | ms |
+| **Attributes** | `openclaw.cron.job_name`, `openclaw.cron.trigger` |
+| **Description** | Cron job run duration, when reported |
+
+## Sub-agent Metrics
+
+Sourced from the `subagent_spawned` (or legacy `subagent_spawning`) and `subagent_ended` hooks.
+
+### `openclaw.subagent.spawns`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.subagent.child_agent_name`, `openclaw.subagent.spawn_reason` |
+| **Description** | Sub-agents spawned |
+
+---
+
+### `openclaw.subagent.ended`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.subagent.child_agent_name`, `openclaw.subagent.success` |
+| **Description** | Sub-agents finished |
+
+---
+
+### `openclaw.subagent.duration`
+
+| | |
+|---|---|
+| **Type** | Histogram |
+| **Unit** | ms |
+| **Attributes** | `openclaw.subagent.child_agent_name`, `gen_ai.response.model` |
+| **Description** | Sub-agent run duration |
+
 
 ## Security Metrics
 
@@ -340,7 +715,7 @@ Catches data exfiltration (`curl -d`, `nc -e`), destructive commands (`rm -rf /`
 Track cost by monitoring `openclaw.llm.tokens.total` over time. In Dynatrace:
 
 ```
-timeseries avg(openclaw.llm.tokens.total), by:{gen_ai.request.model}
+timeseries sum(openclaw.llm.tokens.total), by:{gen_ai.response.model}
 ```
 
 ### Cost by Model Over Time (rate-able, including one-shot sessions — requires enableByModelMetrics: true)

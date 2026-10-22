@@ -52,10 +52,7 @@
       "4": {
         "type": "data",
         "title": "Error Rate",
-        "query": "timeseries {
-  errors = sum(openclaw.llm.errors) + sum(openclaw.tool.errors) + sum(openclaw.cron.errors),
-  total = sum(openclaw.llm.requests) + sum(openclaw.tool.calls) + sum(openclaw.cron.executions)
-}\n| fieldsAdd error_rate = if(total > 0, 100 * errors / total, 0)\n| summarize avg_error_rate = avg(error_rate)",
+        "query": "timeseries {\n  errors = sum(openclaw.llm.errors) + sum(openclaw.tool.errors) + sum(openclaw.cron.errors),\n  total = sum(openclaw.llm.requests) + sum(openclaw.tool.calls) + sum(openclaw.cron.executions)\n}\n| fieldsAdd error_rate = if(total > 0, 100 * errors / total, 0)\n| summarize avg_error_rate = avg(error_rate)",
         "visualization": "singleValue",
         "visualizationSettings": {
           "thresholds": [
@@ -84,10 +81,7 @@
       "6": {
         "type": "data",
         "title": "Token Usage by Type",
-        "query": "timeseries {
-  prompt = sum(openclaw.llm.tokens.prompt),
-  completion = sum(openclaw.llm.tokens.completion)
-}, interval:10m",
+        "query": "timeseries {\n  prompt = sum(openclaw.llm.tokens.prompt),\n  completion = sum(openclaw.llm.tokens.completion)\n}, interval:10m",
         "visualization": "areaChart",
         "visualizationSettings": {
           "chartSettings": {
@@ -195,10 +189,7 @@
       "17": {
         "type": "data",
         "title": "Cron Executions",
-        "query": "timeseries {
-  executions = sum(openclaw.cron.executions),
-  errors = sum(openclaw.cron.errors)
-}, interval:5m",
+        "query": "timeseries {\n  executions = sum(openclaw.cron.executions),\n  errors = sum(openclaw.cron.errors)\n}, interval:5m",
         "visualization": "lineChart",
         "visualizationSettings": {
           "chartSettings": {
@@ -301,12 +292,7 @@
       "27": {
         "type": "data",
         "title": "Security Events",
-        "query": "timeseries {
-  total = sum(openclaw.security.events),
-  sensitive_files = sum(openclaw.security.sensitive_file_access),
-  prompt_injection = sum(openclaw.security.prompt_injection),
-  dangerous_cmd = sum(openclaw.security.dangerous_command)
-}, interval:5m",
+        "query": "timeseries {\n  total = sum(openclaw.security.events),\n  sensitive_files = sum(openclaw.security.sensitive_file_access),\n  prompt_injection = sum(openclaw.security.prompt_injection),\n  dangerous_cmd = sum(openclaw.security.dangerous_command)\n}, interval:5m",
         "visualization": "lineChart",
         "visualizationSettings": {
           "chartSettings": {
@@ -345,12 +331,7 @@
       "31": {
         "type": "data",
         "title": "Session Issues",
-        "query": "timeseries {
-  stuck = sum(openclaw.session.stuck),
-  long_running = sum(openclaw.session.long_running),
-  stalled = sum(openclaw.session.stalled),
-  resets = sum(openclaw.session.resets)
-}, interval:5m",
+        "query": "timeseries {\n  stuck = sum(openclaw.session.stuck),\n  long_running = sum(openclaw.session.long_running),\n  stalled = sum(openclaw.session.stalled),\n  resets = sum(openclaw.session.resets)\n}, interval:5m",
         "visualization": "lineChart",
         "visualizationSettings": {
           "chartSettings": {

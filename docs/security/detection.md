@@ -6,9 +6,9 @@ The OpenClaw observability plugin includes a real-time security detection module
 
 | Detection | Severity | Trigger | What It Catches |
 |-----------|----------|---------|-----------------|
-| **Sensitive File Access** | Critical | `tool.Read`, `tool.Write`, `tool.Edit` | Attempts to access credentials, secrets, SSH keys |
+| **Sensitive File Access** | Critical | `execute_tool Read` / `Write` / `Edit` (lowercase tool names too) | Attempts to access credentials, secrets, SSH keys |
 | **Prompt Injection** | High/Critical | Inbound messages | Social engineering attacks on the AI agent |
-| **Dangerous Commands** | Critical/High | `tool.exec` | Data exfiltration, destructive commands |
+| **Dangerous Commands** | Critical/High | `execute_tool exec` | Data exfiltration, destructive commands |
 | **Token Spike Anomaly** | Warning | Metrics (Dynatrace) | Unusual usage patterns indicating abuse |
 
 ## Detection 1: Sensitive File Access
@@ -31,7 +31,7 @@ api_key, private_key, token     # API credentials
 ### Example Telemetry
 
 ```yaml
-span.name: tool.Read
+span.name: execute_tool Read
 span.status: ERROR
 attributes:
   security.event.detected: true
@@ -131,7 +131,7 @@ systemctl enable/start          # Service manipulation
 ### Example Telemetry
 
 ```yaml
-span.name: tool.exec
+span.name: execute_tool exec
 span.status: ERROR
 attributes:
   security.event.detected: true
@@ -234,9 +234,9 @@ The plugin security detection works at the **application layer** (AI agent conte
 
 ### Example: File Exfiltration Attack
 
-1. **Plugin detects:** `tool.Read` on `.env` file → `sensitive_file_access` alert
+1. **Plugin detects:** `execute_tool Read` on `.env` file → `sensitive_file_access` alert
 2. **Tetragon detects:** `security_file_open` on `/home/user/.env` → kernel event
-3. **Plugin detects:** `tool.exec` with `curl -d` → `dangerous_command` alert
+3. **Plugin detects:** `execute_tool exec` with `curl -d` → `dangerous_command` alert
 4. **Tetragon detects:** `sys_execve` of `/usr/bin/curl` → kernel event
 5. **Tetragon detects:** Network egress to unknown IP → (if network policy enabled)
 
