@@ -217,7 +217,7 @@ const otelObservabilityPlugin = {
     };
 
     // ISI-1900: skip long-lived initialization unless this is a real, live
-    // "full" registration (see isNonFullRegistration() below). Computed
+    // "full" registration (see isNonFullRegistration() above). Computed
     // before touching any of the active-registration bookkeeping below —
     // a non-full registration reaching the SAME module instance as a live
     // "full" one must leave that live registration's hooks, diagnostics
