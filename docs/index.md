@@ -47,7 +47,7 @@ If you only need what the official plugin covers, add this to `~/.openclaw/openc
     "enabled": true,
     "otel": {
       "enabled": true,
-      "endpoint": "http://localhost:4318",
+      "endpoint": "https://otlp-collector.example.com",
       "serviceName": "openclaw-gateway",
       "traces": true,
       "metrics": true,
