@@ -12,8 +12,10 @@
  *     plugin emits.
  */
 
+import { mkdtempSync, copyFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -65,6 +67,29 @@ describe("PLUGIN_VERSION resolution from a compiled build", () => {
     const manifest = readJson(resolve(repoRoot, "openclaw.plugin.json"));
     expect(distModule.PLUGIN_VERSION).toBe(manifest.version);
     expect(distModule.PLUGIN_VERSION).not.toBe("unknown");
+  });
+});
+
+describe("PLUGIN_VERSION fallback when no manifest is reachable", () => {
+  it("resolves to \"unknown\" rather than throwing, when openclaw.plugin.json isn't within any searched depth", async () => {
+    // Isolated from the repo tree entirely (unlike dist/src/, which still
+    // has the real manifest 2 levels up) — exercises the genuine
+    // MANIFEST_SEARCH_DEPTHS exhaustion / `return "unknown"` path that
+    // every other test here can't reach, since they all run somewhere
+    // under this repo where the manifest is always findable.
+    const isolatedDir = mkdtempSync(join(tmpdir(), "otel-version-fallback-"));
+    try {
+      const distVersionPath = resolve(repoRoot, "dist/src/version.js");
+      const isolatedVersionPath = join(isolatedDir, "version.js");
+      copyFileSync(distVersionPath, isolatedVersionPath);
+
+      const isolatedModule = (await import(pathToFileURL(isolatedVersionPath).href)) as {
+        PLUGIN_VERSION: string;
+      };
+      expect(isolatedModule.PLUGIN_VERSION).toBe("unknown");
+    } finally {
+      rmSync(isolatedDir, { recursive: true, force: true });
+    }
   });
 });
 

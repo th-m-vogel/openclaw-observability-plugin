@@ -8,12 +8,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Removed
 
+* **metrics:** removed metrics and span attributes that read fields OpenClaw core never emits (ISI-1018 cleanup, [#20](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/20)): the `openclaw.llm.tokens.system`/`.user`/`.tool_result`/`.skill` token-type breakdown counters and their `_by_model` siblings, the `before_prompt_build`-sourced `openclaw.context.skill_count`/`.skill_names`/`.limit`/`.used`/`.utilization` span attributes, and the `openclaw.context.build_duration` histogram. Cross-checked against OpenClaw core's event type definitions, its official `diagnostics-otel` exporter, and its OpenTelemetry/Prometheus metrics docs: none of these fields exist on `model.usage` or `before_prompt_build`, so the instruments silently recorded nothing since they were first added upstream. No dashboard loses real data, but panels referencing these names should be deleted. `openclaw.llm.cost.usd` is unaffected — it reads a real field (`costUsd`).
 * **compat:** removed the ISI-9700 undefined-rejection crash guard (the `globalThis[Symbol.for("openclaw.unhandledRejection.handlers")]` registration added to work around [openclaw/openclaw#162031](https://github.com/openclaw/openclaw/issues/162031)). That core regression is fixed as of OpenClaw `v2026.9.9` ([openclaw/openclaw#162844](https://github.com/openclaw/openclaw/pull/162844)); `minOpenClawVersion` is raised to `2026.9.9` to match, so every currently-supported host already has the real fix and no longer needs this plugin-side mitigation.
 
 ### Added
 
 * **metrics:** new opt-in `collapseEphemeralSessions` config option (default `false`). When enabled, collapses ephemeral per-run session-key shapes (recurring cron jobs, internal-session-effect turns) to a stable, job-level identifier on metric `gen_ai.conversation.id` labels — fixes a "tokens by session"/"cost by session" dashboard panel being buried in dozens of near-identical one-shot rows for a recurring job. Applies to `openclaw.llm.requests`/`.errors`/`.duration`/`.tokens.*`/`.cost.usd`, `gen_ai.client.token.usage`/`.operation.duration` (`src/hooks.ts`'s per-call metrics and `src/diagnostics.ts`'s token/cost metrics) and `openclaw.tool.calls`/`.tool.duration`/`.approvals` (`src/hooks.ts`). Trace spans and log lines always keep the full, uncollapsed session key for drill-down — this is a metrics-labels-only transform. Recognizes two positional suffix shapes (a trailing `:run:<uuid>`, a trailing `_<uuid>`) rather than any UUID anywhere in the key, so a cron job's own stable ID or a channel/user ID is never mistakenly collapsed. For `internal-session-effects:` session keys specifically (e.g. `skill-workshop-review`), the trailing-`_` shape also accepts any opaque hex+dash token, not only a strict UUID — real per-run IDs for this session type observed live aren't always standard 8-4-4-4-12 UUIDs, so the strict matcher alone missed them. Some `internal-session-effects:` job types carry no label at all before the per-run id, so the opaque id sits directly after the marker's trailing `:` with nothing to anchor on — a whole-tail hex+dash check now catches that shape too, collapsing it down to the marker itself. Declared in `openclaw.plugin.json`'s `configSchema` alongside the other options. This is a dashboard-legibility feature, not a fix for the `rate()`/`increase()` one-shot-series blind spot described in `docs/limitations.md` — see that doc for the distinction.
-* **metrics:** new opt-in `enableByModelMetrics` config option (default `false`). When enabled, adds a `_by_model` sibling for every per-conversation LLM metric (`openclaw.llm.requests`/`.errors`/`.duration`/`.tokens.total`/`.prompt`/`.completion`/`.system`/`.user`/`.tool_result`/`.skill`/`.cost.usd`, plus `openclaw.genai.client.token.usage_by_model`/`.operation.duration_by_model` mirroring the two stable GenAI semconv histograms) — same value as the source metric, same attributes minus `gen_ai.conversation.id`/`gen_ai.agent.id`. Fixes the `rate()`/`increase()` blind spot described in `docs/limitations.md` for one-shot (isolated cron/background) sessions: query the `_by_model` sibling in a windowed panel instead of the raw per-conversation metric. One residual gap: a `_by_model` series is still born flat on its first sample per provider+model per gateway process lifetime, same as any series — see `docs/limitations.md` for the detail. Off by default — enabling it roughly doubles the number of LLM metric data points this plugin emits, which has a direct cost impact on a metrics backend billed by data volume or storage. Declared in `openclaw.plugin.json`'s `configSchema` alongside the other options. Tool metrics (`openclaw.tool.*`) have the same underlying issue but are out of scope for this change.
+* **metrics:** new opt-in `enableByModelMetrics` config option (default `false`). When enabled, adds a `_by_model` sibling for every per-conversation LLM metric (`openclaw.llm.requests`/`.errors`/`.duration`/`.tokens.total`/`.tokens.prompt`/`.tokens.completion`/`.cost.usd`, plus `openclaw.genai.client.token.usage_by_model`/`.operation.duration_by_model` mirroring the two stable GenAI semconv histograms) — same value as the source metric, same attributes minus `gen_ai.conversation.id`/`gen_ai.agent.id`. Fixes the `rate()`/`increase()` blind spot described in `docs/limitations.md` for one-shot (isolated cron/background) sessions: query the `_by_model` sibling in a windowed panel instead of the raw per-conversation metric. One residual gap: a `_by_model` series is still born flat on its first sample per provider+model per gateway process lifetime, same as any series — see `docs/limitations.md` for the detail. Off by default — enabling it roughly doubles the number of LLM metric data points this plugin emits, which has a direct cost impact on a metrics backend billed by data volume or storage. Declared in `openclaw.plugin.json`'s `configSchema` alongside the other options. Tool metrics (`openclaw.tool.*`) have the same underlying issue but are out of scope for this change.
+* **metrics:** new `openclaw.skill.used` counter ([#21](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/21)), sourced from OpenClaw core's own `skill.used` diagnostic event. Attributes mirror core's own metric of the same name: `openclaw.skill.name`, `openclaw.skill.source`, `openclaw.skill.activation`, plus `openclaw.agent`/`openclaw.toolName` when the event carries them. This is the real skill-usage signal the removed ISI-1018 fields (see Removed above) were never actually wired to.
+* **metrics:** new `openclaw.model.failover` counter ([#22](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/22)), sourced from core's `model.failover` diagnostic event — one increment per provider/model switchover (error, rate limit, routing policy). Attributes mirror core's own metric: `openclaw.provider`, `openclaw.model`, `openclaw.failover.to_provider`/`.to_model`/`.reason`/`.suspended`, `openclaw.lane`, each present only when the event carries it.
+* **metrics:** new `openclaw.tool.loop` counter ([#23](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/23)), sourced from core's `tool.loop` diagnostic event — one increment each time core's repetitive-tool-call detector warns about or blocks a loop. Attributes mirror core's own metric: `openclaw.toolName`, `openclaw.loop.level`/`.action`/`.detector`/`.count`, plus `openclaw.loop.paired_tool` when present. Useful as a runaway-agent signal.
+
+### Bug Fixes
+
+* **privacy:** `before_model_resolve` no longer logs its full hook context as raw JSON at info level (which the OTLP log bridge exports by default, and which could carry arbitrary session/workspace content) — it now logs the context's key names only.
+* **security:** the security-detection span status message is now redacted the same way the span attribute and span-event payload already were; previously it could carry raw secrets/tokens into the trace backend.
+* **security:** the bare-word sensitive-file patterns (`password`, `secret(s)`, `token(s)`, `credentials`, `api-key`, `private-key`) are now word-boundary anchored, so ordinary paths that merely contain the word (e.g. `tokenizer.ts`, `telemetry/`) no longer trigger `sensitive_file_access` false positives.
+* **diagnostics:** added a second one-time startup warning when the host is older than the manifest's `minOpenClawVersion` (`2026.9.9`). The existing warning only covered the lower, feature-specific `2026.9.8` floor for per-call token metrics, so a host on exactly `2026.9.8` previously loaded with no warning despite lacking the core crash fix the new floor exists for.
+* **preload:** `instrumentation/preload.mjs` now reports the real plugin version (read from `openclaw.plugin.json`) as `service.version`, instead of the hard-coded `"0.1.0"` placeholder that ISI-995 removed everywhere else.
+* **status:** the `otel` CLI command, the status RPC method, the `otel_status` agent tool, and the `start()` log line now show the effective per-signal endpoints (honoring `signalEndpoints` overrides). Previously they only showed the shared `endpoint`, which for a `signalEndpoints`-only setup displayed a misleading `http://localhost:4318` default.
+* **manifest:** `openclaw.plugin.json`'s `captureContent` schema and UI hints now include `toolErrorMessages`, an implemented flag that was missing from the declared schema.
+
+### Dependencies
+
+* bumped `@opentelemetry/api` 1.9.0 → 1.9.1 ([#13](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/13)), `@opentelemetry/semantic-conventions` 1.30.0 → 1.43.0 ([#14](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/14)), `@traceloop/node-server-sdk` 0.22.6 → 0.27.0 ([#15](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/15)), the OTLP exporter/SDK `0.x` family 0.203.0 → 0.223.0 ([#16](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/16)), and the OTel core/SDK `2.x` family to 2.12.0 ([#17](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/17)).
+* **semconv:** as a result of the semantic-conventions bump, every resource's `schema_url` is now `https://opentelemetry.io/schemas/1.43.0` (was `1.39.0`, the version transitive dependencies had actually installed). The plugin's own attribute schema, `openclaw.schema.version`, is unchanged at `1.5.0`.
+* **build:** TypeScript 5.7.0 → 7.0.2 ([#18](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/18)) — the native Go-ported compiler, which installs a platform-specific binary as an optional dependency. `typescript` is a devDependency only; `dist/` output and runtime behavior are unchanged.
+
+### Documentation
+
+* full documentation accuracy pass ahead of 0.12.0: config examples that showed the official `diagnostics-otel` plugin's `diagnostics.otel` block in places documenting this plugin now show `plugins.entries.otel-observability.config`; tool-span names corrected to the real `execute_tool <name>` form; the metrics reference now lists every metric the plugin actually emits; `logConfig` documented; quoted log lines and hook-registration lists checked against the source; Dynatrace dashboards fixed to use real metric/attribute names (`openclaw.llm.cost.usd`, `gen_ai.response.model`) and stripped of unrelated `paperclip.*` tiles.
 
 ## [0.11.0](https://github.com/th-m-vogel/openclaw-observability-plugin/compare/v0.10.0...v0.11.0) (2026-10-11)
 
@@ -188,53 +212,32 @@ Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`) — upstrea
 ### Bug Fixes
 
 * guard context utilization against zero context limit ([b3db23b](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b3db23b75dcb29c6a3022450a487bf28f11d7867))
+* **`gen_ai.response.finish_reasons` array hardening (ISI-993).** Non-string
+  entries (`null`, `undefined`, numbers, empty strings) are now filtered out
+  of the array before the attribute is set. If the array contains no valid
+  strings after filtering, the attribute is omitted entirely. This prevents
+  malformed upstream events from emitting non-spec data via the unchecked
+  TypeScript cast that landed in the initial Story 1 fix.
+* **Boundary-straddle redaction leak in content capture (ISI-1000).**
+  `captureContentAttribute` and `setToolInputPreview` now redact BEFORE
+  truncating. The previous order let a secret straddling the 8192-char
+  (or 1000-char preview) cap get sliced below the redaction regex's
+  minimum-match length, leaving a plaintext token prefix in the captured
+  span attribute. Verified with a bearer-token regression test driving
+  the boundary.
+* **Synthetic tool span SECURITY warn log redaction (ISI-1000).** The
+  third `[otel] SECURITY: ...` warn callsite (the `tool_result_persist`
+  no-active-tool-span fallback) was missing the `redactSensitiveText`
+  wrap that the other two security warns already had. With ISI-997's
+  OTLP log bridge on `main`, that callsite could ship credentials
+  embedded in user-supplied paths/commands to the backend logs. All
+  three callsites now share the redacted shape.
 
-## [0.4.1](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.4.0...v0.4.1) (2026-05-12)
+### Detailed notes
 
+The notes below cover the attribute-schema work (`openclaw.schema.version` `1.1.0` → `1.3.0`) and related changes. They were originally drafted under an `[Unreleased]` heading and never folded into a release entry at the time; they are filed here because this release's schema `1.3.0` cut-over (ISI-1004) completes that body of work. Some of the items described (ISI-993, ISI-998, ISI-1000) first shipped in `0.4.0`, per that release's commit list. Their "Fixed" items are merged into Bug Fixes above.
 
-### Bug Fixes
-
-* W3C trace context propagation for subagent sessions (ISI-1021) ([079d2f4](https://github.com/henrikrexed/openclaw-observability-plugin/commit/079d2f49ad8451d1c0274fe962a0664872904086))
-* W3C trace context propagation for subagent sessions (ISI-1021) ([d02ec10](https://github.com/henrikrexed/openclaw-observability-plugin/commit/d02ec10b9b2badd24540cdeb302c67f9ef8c69da))
-
-## [0.4.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.3.0...v0.4.0) (2026-05-12)
-
-
-### Features
-
-* **dashboard:** align repo OpenClaw overview to V3 spans (ISI-1007) ([c250fe1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/c250fe1a11715dd5875cc9a861b62070e89cc57e))
-* **dashboard:** align repo OpenClaw overview to V3 spans (ISI-1007) ([511201f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/511201f98ed7cb4659e003109150deff8ac3f0cd))
-* **otel:** configurable trace sampling rate (ISI-998) ([32afcdf](https://github.com/henrikrexed/openclaw-observability-plugin/commit/32afcdf491a66f16cad1cf3c26adada0e1fe8d44))
-* **otel:** configurable trace sampling rate (ISI-998) ([acd6a7c](https://github.com/henrikrexed/openclaw-observability-plugin/commit/acd6a7ca0a736faa97c1f9c074a1c3cc9ebe7680))
-* **otel:** granular ContentCapturePolicy for span content capture (ISI-1000) ([592920d](https://github.com/henrikrexed/openclaw-observability-plugin/commit/592920d565c40c7c19526ceb27513e8ac4a33b8e))
-* **otel:** granular ContentCapturePolicy for span content capture (ISI-1000) ([aa207b1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/aa207b1af2b22bdd496195da3904691035449130))
-* **otel:** W3C trace context propagation (ISI-1001) ([53695b1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/53695b19587653c2c2783c295611aabd9f655ca9))
-* **otel:** W3C trace context propagation for distributed tracing (ISI-1001) ([95e2178](https://github.com/henrikrexed/openclaw-observability-plugin/commit/95e217888c8ba09af5ce03bf85553be4381161b0))
-* **otel:** wire OTLP log export pipeline into plugin lifecycle (ISI-997) ([d26944c](https://github.com/henrikrexed/openclaw-observability-plugin/commit/d26944c43aea667a5ab0546d538afe7916c08d43))
-* **otel:** wire OTLP log export pipeline into plugin lifecycle (ISI-997) ([e46a236](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e46a2367623581f1961db718bfcf5abf410c148c))
-* publish to npm + add release-please/publish workflows (ISI-947) ([20a9f62](https://github.com/henrikrexed/openclaw-observability-plugin/commit/20a9f62aba2f478c9df17cf06cc5524c6226b386))
-* publish to npm + add release-please/publish workflows (ISI-947) ([2ba08c1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/2ba08c1251b21675c5feb54eaca69c24e4b91cbe))
-* **security:** redact sensitive values from trace attributes (ISI-999) ([2013060](https://github.com/henrikrexed/openclaw-observability-plugin/commit/2013060fee00c0e2acdd7e1587d6db0df8bd4e43))
-* **security:** redact sensitive values from trace attributes (ISI-999) ([675311a](https://github.com/henrikrexed/openclaw-observability-plugin/commit/675311af452afa3727a43075db885949e74525bc))
-
-
-### Bug Fixes
-
-* **otel:** address PR [#30](https://github.com/henrikrexed/openclaw-observability-plugin/issues/30) review findings (ISI-1000) ([48eb16d](https://github.com/henrikrexed/openclaw-observability-plugin/commit/48eb16dd332d2902aa0891cf1842f6976ebd8c38))
-* **otel:** apply code-review patches to OTLP log bridge (ISI-997) ([31a885d](https://github.com/henrikrexed/openclaw-observability-plugin/commit/31a885d4fd9e3eb853ecca97c1875490e046824b))
-* **otel:** bring GenAI semconv emission back to registry compliance (ISI-993) ([53eda2a](https://github.com/henrikrexed/openclaw-observability-plugin/commit/53eda2ad14034a07e9dba6f87a5967eb304501a9))
-* **otel:** bring GenAI semconv emission back to registry compliance (ISI-993) ([a825927](https://github.com/henrikrexed/openclaw-observability-plugin/commit/a825927635164c021ef79e3e0dc48a448811536b))
-* **otel:** close M1+M2 redaction gaps in content capture (ISI-1000) ([28dd485](https://github.com/henrikrexed/openclaw-observability-plugin/commit/28dd48575b986c8842572c5e922948371ac59342))
-* **otel:** detect preloaded SDK to avoid double provider registration (ISI-996) ([f1999a5](https://github.com/henrikrexed/openclaw-observability-plugin/commit/f1999a5c8f702f2bb1a978847ca9fe6a7fab1009))
-* **otel:** detect preloaded SDK to avoid double provider registration (ISI-996) ([0275ca1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/0275ca11caadbe56969cb095a63ce05900dec3b1))
-* **otel:** filter non-string entries from gen_ai.response.finish_reasons (ISI-993) ([3a29e55](https://github.com/henrikrexed/openclaw-observability-plugin/commit/3a29e553a1b0a350ace9970bf1eb0c42d49b2369))
-* **otel:** harden preloaded SDK detection + add unit tests (ISI-1002) ([9871673](https://github.com/henrikrexed/openclaw-observability-plugin/commit/9871673c03dd4a1c754a73940f73b39014f4090f))
-* **otel:** harden preloaded SDK detection + unit tests (ISI-1002) ([e87598a](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e87598ab1f39ed35090574e9a740df69febb3d7c))
-* **security:** close redaction bypasses found in PR [#29](https://github.com/henrikrexed/openclaw-observability-plugin/issues/29) review (ISI-999) ([af3271e](https://github.com/henrikrexed/openclaw-observability-plugin/commit/af3271ef5140d4a0d44d662e709912fda3f85f23))
-
-## [Unreleased]
-
-### Removed
+#### Removed
 
 - **Legacy OTel semconv 2026-04 attributes — dual-emit window closed (ISI-1004).**
   Schema version bumped to `1.3.0` (resource attribute
@@ -266,7 +269,7 @@ Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`) — upstrea
   [ISI-994](./docs/architecture.md#removed-attributes--dual-emit-window-closed-schema-130)
   for the migration history.
 
-### Added
+#### Added
 
 - **Resource identity hygiene (ISI-995).** The trace, metric, and log
   Resources now emit a real `service.version` resolved from
@@ -339,7 +342,7 @@ Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`) — upstrea
   the ESM preload. Takes precedence over the legacy
   `OPENCLAW_OTEL_CAPTURE_CONTENT` when both are set.
 - **Configurable trace sampling rate (ISI-998).** New `sampleRate` option
-  (0.0–1.0) in `diagnostics.otel`. When set, the plugin wires a
+  (0.0–1.0) in this plugin's own config (`plugins.entries.otel-observability.config`). When set, the plugin wires a
   `ParentBasedSampler` around a `TraceIdRatioBasedSampler` so root spans
   make a deterministic, trace-id-based sampling decision and child spans
   inherit it — keeping distributed traces coherent under head-based
@@ -347,7 +350,7 @@ Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`) — upstrea
   and the SDK default (`parentbased_always_on`) is used. Documented in
   `docs/configuration.md#trace-sampling`.
 
-### Changed
+#### Changed
 
 - **OpenClaw attribute schema bumped to `1.1.0` (ISI-993).** Three call sites
   that emitted invalid OpenTelemetry GenAI semantic-convention data are now
@@ -361,30 +364,7 @@ Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`) — upstrea
     `generate_content`, `invoke_agent`, `invoke_workflow`, `retrieval`,
     `text_completion`). Cron context remains available via `openclaw.cron.*`.
 
-### Fixed
-
-- **`gen_ai.response.finish_reasons` array hardening (ISI-993).** Non-string
-  entries (`null`, `undefined`, numbers, empty strings) are now filtered out
-  of the array before the attribute is set. If the array contains no valid
-  strings after filtering, the attribute is omitted entirely. This prevents
-  malformed upstream events from emitting non-spec data via the unchecked
-  TypeScript cast that landed in the initial Story 1 fix.
-- **Boundary-straddle redaction leak in content capture (ISI-1000).**
-  `captureContentAttribute` and `setToolInputPreview` now redact BEFORE
-  truncating. The previous order let a secret straddling the 8192-char
-  (or 1000-char preview) cap get sliced below the redaction regex's
-  minimum-match length, leaving a plaintext token prefix in the captured
-  span attribute. Verified with a bearer-token regression test driving
-  the boundary.
-- **Synthetic tool span SECURITY warn log redaction (ISI-1000).** The
-  third `[otel] SECURITY: ...` warn callsite (the `tool_result_persist`
-  no-active-tool-span fallback) was missing the `redactSensitiveText`
-  wrap that the other two security warns already had. With ISI-997's
-  OTLP log bridge on `main`, that callsite could ship credentials
-  embedded in user-supplied paths/commands to the backend logs. All
-  three callsites now share the redacted shape.
-
-### Breaking
+#### Breaking
 
 - **Tool-approval attributes moved out of the reserved `gen_ai.*` namespace
   (ISI-993).** The OTel registry reserves `gen_ai.*` for standardised
@@ -397,6 +377,49 @@ Fork-maintained release (`th-m-vogel/openclaw-observability-plugin`) — upstrea
   Dashboards or alert rules filtering on the old `gen_ai.tool.approval.*` keys
   must be updated. `OPENCLAW_SCHEMA_VERSION` is bumped from `1.0.0` to `1.1.0`
   so consumers can detect the rename.
+
+## [0.4.1](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.4.0...v0.4.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* W3C trace context propagation for subagent sessions (ISI-1021) ([079d2f4](https://github.com/henrikrexed/openclaw-observability-plugin/commit/079d2f49ad8451d1c0274fe962a0664872904086))
+* W3C trace context propagation for subagent sessions (ISI-1021) ([d02ec10](https://github.com/henrikrexed/openclaw-observability-plugin/commit/d02ec10b9b2badd24540cdeb302c67f9ef8c69da))
+
+## [0.4.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.3.0...v0.4.0) (2026-05-12)
+
+
+### Features
+
+* **dashboard:** align repo OpenClaw overview to V3 spans (ISI-1007) ([c250fe1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/c250fe1a11715dd5875cc9a861b62070e89cc57e))
+* **dashboard:** align repo OpenClaw overview to V3 spans (ISI-1007) ([511201f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/511201f98ed7cb4659e003109150deff8ac3f0cd))
+* **otel:** configurable trace sampling rate (ISI-998) ([32afcdf](https://github.com/henrikrexed/openclaw-observability-plugin/commit/32afcdf491a66f16cad1cf3c26adada0e1fe8d44))
+* **otel:** configurable trace sampling rate (ISI-998) ([acd6a7c](https://github.com/henrikrexed/openclaw-observability-plugin/commit/acd6a7ca0a736faa97c1f9c074a1c3cc9ebe7680))
+* **otel:** granular ContentCapturePolicy for span content capture (ISI-1000) ([592920d](https://github.com/henrikrexed/openclaw-observability-plugin/commit/592920d565c40c7c19526ceb27513e8ac4a33b8e))
+* **otel:** granular ContentCapturePolicy for span content capture (ISI-1000) ([aa207b1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/aa207b1af2b22bdd496195da3904691035449130))
+* **otel:** W3C trace context propagation (ISI-1001) ([53695b1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/53695b19587653c2c2783c295611aabd9f655ca9))
+* **otel:** W3C trace context propagation for distributed tracing (ISI-1001) ([95e2178](https://github.com/henrikrexed/openclaw-observability-plugin/commit/95e217888c8ba09af5ce03bf85553be4381161b0))
+* **otel:** wire OTLP log export pipeline into plugin lifecycle (ISI-997) ([d26944c](https://github.com/henrikrexed/openclaw-observability-plugin/commit/d26944c43aea667a5ab0546d538afe7916c08d43))
+* **otel:** wire OTLP log export pipeline into plugin lifecycle (ISI-997) ([e46a236](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e46a2367623581f1961db718bfcf5abf410c148c))
+* publish to npm + add release-please/publish workflows (ISI-947) ([20a9f62](https://github.com/henrikrexed/openclaw-observability-plugin/commit/20a9f62aba2f478c9df17cf06cc5524c6226b386))
+* publish to npm + add release-please/publish workflows (ISI-947) ([2ba08c1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/2ba08c1251b21675c5feb54eaca69c24e4b91cbe))
+* **security:** redact sensitive values from trace attributes (ISI-999) ([2013060](https://github.com/henrikrexed/openclaw-observability-plugin/commit/2013060fee00c0e2acdd7e1587d6db0df8bd4e43))
+* **security:** redact sensitive values from trace attributes (ISI-999) ([675311a](https://github.com/henrikrexed/openclaw-observability-plugin/commit/675311af452afa3727a43075db885949e74525bc))
+
+
+### Bug Fixes
+
+* **otel:** address PR [#30](https://github.com/henrikrexed/openclaw-observability-plugin/issues/30) review findings (ISI-1000) ([48eb16d](https://github.com/henrikrexed/openclaw-observability-plugin/commit/48eb16dd332d2902aa0891cf1842f6976ebd8c38))
+* **otel:** apply code-review patches to OTLP log bridge (ISI-997) ([31a885d](https://github.com/henrikrexed/openclaw-observability-plugin/commit/31a885d4fd9e3eb853ecca97c1875490e046824b))
+* **otel:** bring GenAI semconv emission back to registry compliance (ISI-993) ([53eda2a](https://github.com/henrikrexed/openclaw-observability-plugin/commit/53eda2ad14034a07e9dba6f87a5967eb304501a9))
+* **otel:** bring GenAI semconv emission back to registry compliance (ISI-993) ([a825927](https://github.com/henrikrexed/openclaw-observability-plugin/commit/a825927635164c021ef79e3e0dc48a448811536b))
+* **otel:** close M1+M2 redaction gaps in content capture (ISI-1000) ([28dd485](https://github.com/henrikrexed/openclaw-observability-plugin/commit/28dd48575b986c8842572c5e922948371ac59342))
+* **otel:** detect preloaded SDK to avoid double provider registration (ISI-996) ([f1999a5](https://github.com/henrikrexed/openclaw-observability-plugin/commit/f1999a5c8f702f2bb1a978847ca9fe6a7fab1009))
+* **otel:** detect preloaded SDK to avoid double provider registration (ISI-996) ([0275ca1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/0275ca11caadbe56969cb095a63ce05900dec3b1))
+* **otel:** filter non-string entries from gen_ai.response.finish_reasons (ISI-993) ([3a29e55](https://github.com/henrikrexed/openclaw-observability-plugin/commit/3a29e553a1b0a350ace9970bf1eb0c42d49b2369))
+* **otel:** harden preloaded SDK detection + add unit tests (ISI-1002) ([9871673](https://github.com/henrikrexed/openclaw-observability-plugin/commit/9871673c03dd4a1c754a73940f73b39014f4090f))
+* **otel:** harden preloaded SDK detection + unit tests (ISI-1002) ([e87598a](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e87598ab1f39ed35090574e9a740df69febb3d7c))
+* **security:** close redaction bypasses found in PR [#29](https://github.com/henrikrexed/openclaw-observability-plugin/issues/29) review (ISI-999) ([af3271e](https://github.com/henrikrexed/openclaw-observability-plugin/commit/af3271ef5140d4a0d44d662e709912fda3f85f23))
 
 ## [0.3.1] — 2026-05-10
 

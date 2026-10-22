@@ -19,26 +19,33 @@ Send OpenClaw telemetry directly to Dynatrace using OTLP.
 
 ## Configure OpenClaw
 
-Add to `~/.openclaw/openclaw.json`:
+Add to `~/.openclaw/openclaw.json` (this plugin's entry — see [Getting Started](../getting-started.md#option-2-custom-hook-based-plugin-deeper-tracing) for cloning and building it first):
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "https://{environment-id}.live.dynatrace.com/api/v2/otlp",
-      "headers": {
-        "Authorization": "Api-Token dt0c01.XXXXXXXX"
-      },
-      "serviceName": "openclaw-gateway",
-      "traces": true,
-      "metrics": true,
-      "logs": true
+  "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": {
+          "endpoint": "https://{environment-id}.live.dynatrace.com/api/v2/otlp",
+          "headers": {
+            "Authorization": "Api-Token dt0c01.XXXXXXXX"
+          },
+          "serviceName": "openclaw-gateway",
+          "traces": true,
+          "metrics": true,
+          "logs": true
+        }
+      }
     }
   }
 }
 ```
+
+The plugin appends `/v1/traces`, `/v1/metrics`, and `/v1/logs` to `endpoint` itself. If you use the official `diagnostics-otel` plugin instead of this one, the same `endpoint`/`headers` values go in its `diagnostics.otel` block — but don't enable both.
 
 Replace:
 - `{environment-id}` — Your Dynatrace environment ID (e.g., `abc12345`)
@@ -50,15 +57,20 @@ For Dynatrace Managed, use your ActiveGate URL:
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "https://{your-activegate}/e/{environment-id}/api/v2/otlp",
-      "headers": {
-        "Authorization": "Api-Token dt0c01.XXXXXXXX"
-      },
-      "serviceName": "openclaw-gateway"
+  "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": {
+          "endpoint": "https://{your-activegate}/e/{environment-id}/api/v2/otlp",
+          "headers": {
+            "Authorization": "Api-Token dt0c01.XXXXXXXX"
+          },
+          "serviceName": "openclaw-gateway"
+        }
+      }
     }
   }
 }
@@ -96,7 +108,7 @@ openclaw gateway restart
    - `openclaw.tool.calls` — Tool call counter
    - `openclaw.session.resets` — Session reset counter
 
-**From the built-in `diagnostics-otel` plugin (only if you also enabled it in `openclaw.json`):**
+**From the built-in `diagnostics-otel` plugin (only if you use it instead of this plugin — don't run both):**
    - `openclaw.tokens` — Token usage (emitted by `diagnostics-otel`, not by this plugin)
    - `openclaw.cost.usd` — Cost tracking (emitted by `diagnostics-otel`, not by this plugin)
    - `openclaw.run.duration_ms` — Agent run times

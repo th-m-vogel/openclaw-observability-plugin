@@ -10,8 +10,28 @@
 
 import { register } from 'node:module';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve as resolvePath } from 'node:path';
 import { resolveCaptureContent } from './capture-content.mjs';
+
+// Mirrors src/version.ts's resolution (same manifest, same "unknown"
+// fallback) — this file ships unbuilt alongside openclaw.plugin.json
+// (package.json's `files`), so a single fixed depth is enough, unlike
+// version.ts which also has to account for a compiled dist/src/ location.
+function readPluginVersion() {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const manifestPath = resolvePath(here, '..', 'openclaw.plugin.json');
+    const parsed = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (typeof parsed.version === 'string' && parsed.version.length > 0) {
+      return parsed.version;
+    }
+  } catch {
+    // Fall through to "unknown".
+  }
+  return 'unknown';
+}
 
 // Step 1: Register IITM as an ESM module loader hook
 // This MUST happen before any instrumented modules are imported.
@@ -33,7 +53,7 @@ const TRACE_CONTENT = resolveCaptureContent();
 
 const resource = resourceFromAttributes({
   "service.name": SERVICE_NAME,
-  "service.version": "0.1.0",
+  "service.version": readPluginVersion(),
   "telemetry.sdk.name": "openclaw-otel-preload",
 });
 

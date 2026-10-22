@@ -7,6 +7,7 @@ Configure the custom hook-based OTel observability plugin via `~/.openclaw/openc
 ```json
 {
   "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
     "entries": {
       "otel-observability": {
         "enabled": true,
@@ -50,10 +51,10 @@ Plugin entry configuration.
 | `metrics` | boolean | `true` | Enable metrics export |
 | `logs` | boolean | `true` | Enable log forwarding |
 | `sampleRate` | number | — | Trace sampling rate, `0.0`–`1.0`. Omit to use the SDK default (`parentbased_always_on`). **Overrides `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG`** — see [Trace Sampling](#trace-sampling) for precedence rules. |
-| `metricsIntervalMs` | number | `30000` | Metrics export interval in milliseconds |
+| `metricsIntervalMs` | number | `30000` | Metrics export interval in milliseconds (values below `1000` are ignored and the default is used) |
 | `captureContent` | boolean \| object | `false` | Span content capture policy |
 | `resourceAttributes` | object | `{}` | Extra OpenTelemetry resource attributes |
-| `logConfig` | object | — | Log filtering and exclusion rules |
+| `logConfig` | object | — | Filtering rules for which log lines the OTLP log pipeline exports — see [Log Filtering (`logConfig`)](#log-filtering-logconfig) |
 | `signalEndpoints` | object | — | Per-signal OTLP endpoint overrides (`metrics`/`logs`/`traces`); falls back to `endpoint` |
 | `signalHeaders` | object | — | Per-signal header overrides (`metrics`/`logs`/`traces`); replaces `headers` entirely for that signal |
 | `collapseEphemeralSessions` | boolean | `false` | Collapse ephemeral per-run session keys (recurring cron jobs, internal-session-effect turns) to a stable job-level identifier **on metric labels only** — see [Metrics Reference](./telemetry/metrics.md#collapseephemeralsessions-metrics-only) for which metrics this affects and [Limitations](./limitations.md) for why it exists |
@@ -166,17 +167,24 @@ If only some signals need their own endpoint, list only those — the rest keep 
 
 ## Authentication
 
+Credentials go in `headers` (or per signal in `signalHeaders`), sent with every OTLP export request.
+
 ### Bearer Token
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "https://api.example.com/otlp",
-      "headers": {
-        "Authorization": "Bearer your-token-here"
+  "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": {
+          "endpoint": "https://api.example.com/otlp",
+          "headers": {
+            "Authorization": "Bearer your-token-here"
+          }
+        }
       }
     }
   }
@@ -187,13 +195,18 @@ If only some signals need their own endpoint, list only those — the rest keep 
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "https://{env-id}.live.dynatrace.com/api/v2/otlp",
-      "headers": {
-        "Authorization": "Api-Token dt0c01.xxx..."
+  "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": {
+          "endpoint": "https://{env-id}.live.dynatrace.com/api/v2/otlp",
+          "headers": {
+            "Authorization": "Api-Token dt0c01.xxx..."
+          }
+        }
       }
     }
   }
@@ -204,13 +217,18 @@ If only some signals need their own endpoint, list only those — the rest keep 
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "https://otlp-gateway-prod-us-central-0.grafana.net/otlp",
-      "headers": {
-        "Authorization": "Basic base64(instanceId:apiKey)"
+  "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": {
+          "endpoint": "https://otlp-gateway-prod-us-central-0.grafana.net/otlp",
+          "headers": {
+            "Authorization": "Basic base64(instanceId:apiKey)"
+          }
+        }
       }
     }
   }
@@ -224,9 +242,11 @@ Control trace sampling rate to reduce volume:
 ```json
 {
   "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
     "entries": {
       "otel-observability": {
         "enabled": true,
+        "hooks": { "allowConversationAccess": true },
         "config": {
           "endpoint": "http://localhost:4318",
           "sampleRate": 0.1
@@ -237,10 +257,13 @@ Control trace sampling rate to reduce volume:
 }
 ```
 
-- `1.0` — Sample all traces (default)
-- `0.5` — Sample 50% of traces
-- `0.1` — Sample 10% of traces
-- `0.0` — Disable trace sampling
+- not set (default) — every trace is kept (the SDK's default `parentbased_always_on` sampler)
+- `1.0` — keep every trace, via the plugin's own ratio sampler
+- `0.5` — keep 50% of traces
+- `0.1` — keep 10% of traces
+- `0.0` — drop every trace (no spans are recorded or exported; metrics and logs are unaffected — use `"traces": false` if you want to turn tracing off entirely)
+
+See [Trace Sampling](#trace-sampling) below for the exact semantics.
 
 ## Selective Export
 
@@ -250,14 +273,19 @@ Enable only specific signals:
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "http://localhost:4318",
-      "traces": true,
-      "metrics": false,
-      "logs": false
+  "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": {
+          "endpoint": "http://localhost:4318",
+          "traces": true,
+          "metrics": false,
+          "logs": false
+        }
+      }
     }
   }
 }
@@ -267,14 +295,19 @@ Enable only specific signals:
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "http://localhost:4318",
-      "traces": false,
-      "metrics": true,
-      "logs": false
+  "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": {
+          "endpoint": "http://localhost:4318",
+          "traces": false,
+          "metrics": true,
+          "logs": false
+        }
+      }
     }
   }
 }
@@ -284,32 +317,81 @@ Enable only specific signals:
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "http://localhost:4318",
-      "traces": false,
-      "metrics": false,
-      "logs": true
+  "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": {
+          "endpoint": "http://localhost:4318",
+          "traces": false,
+          "metrics": false,
+          "logs": true
+        }
+      }
     }
   }
 }
 ```
 
+## Log Filtering (`logConfig`)
+
+With `logs: true`, every line this plugin logs through the gateway logger (the `[otel] ...` lines, including debug/info lines) is also exported as an OTLP log record. `logConfig` controls which of those lines get exported. It only affects OTLP export — the gateway's own console/journal output is unchanged.
+
+```json
+{
+  "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": {
+          "logs": true,
+          "logConfig": {
+            "excludeLevels": ["debug", "trace"],
+            "excludeMessagePatterns": ["Registered "],
+            "filters": [
+              { "field": "message", "pattern": "pipeline active", "action": "include" },
+              { "field": "level", "pattern": "info", "action": "exclude" }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+This example drops all debug/trace records and the per-hook `Registered ...` lines, then — via `filters` — drops every other info record except the `Observability pipeline active` startup confirmation. Warnings and errors are still exported.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `excludeLevels` | string[] | Drop records at these levels (`trace`, `debug`, `info`, `warn`, `error`, `fatal`). Case-insensitive. The usual way to mute noisy debug/info output. |
+| `excludeLoggers` | string[] | Drop records whose logger name contains any of these strings (case-insensitive substring match). |
+| `excludeMessagePatterns` | string[] | Drop records whose message contains any of these strings (case-insensitive substring match). |
+| `filters` | object[] | Ordered rules, each `{ "field": "logger" \| "message" \| "level" \| "type", "pattern": "<substring>", "action": "exclude" \| "include" }`. The first rule whose pattern matches decides: `exclude` drops the record, `include` keeps it and skips the remaining rules. Rules with an unknown `field` or `action` are ignored. |
+| `enabled` | boolean | Parsed but currently has no effect. To turn off log export, set `"logs": false` instead. |
+
+Order of evaluation: `excludeLevels`, then `excludeLoggers`, then `excludeMessagePatterns` — any match drops the record — and only then `filters`. An `include` rule therefore can't rescue a record that one of the three `exclude*` lists already dropped. A record matching nothing is exported.
+
+Unlike the trace/metric settings, `logs` and `logConfig` changes can take effect through a plugin reload (see [Not hot-reloadable](#not-hot-reloadable) below).
+
 ## Environment Variables
 
-OpenClaw also respects standard OTel environment variables as fallbacks:
+The plugin's own config (`plugins.entries.otel-observability.config`) does **not** fall back to environment variables. `endpoint`, `protocol`, `serviceName`, and every other option above come only from the config file, falling back to the defaults in the table above — setting `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_SERVICE_NAME` has no effect on the plugin's exporters.
 
-| Variable | Description |
-|----------|-------------|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Default OTLP endpoint |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | Default protocol |
-| `OTEL_SERVICE_NAME` | Default service name |
-| `OPENCLAW_OTEL_CAPTURE_CONTENT` | Legacy single-boolean flag for Traceloop content capture. `true` enables prompt/completion text on LLM-client spans. See [captureContent (gateway-launch setting)](#capturecontent-gateway-launch-setting). |
-| `OPENCLAW_OTEL_CONTENT_POLICY` | Granular policy JSON (ISI-1000). When set, takes precedence over the legacy boolean. Same shape as the plugin's `captureContent` object form. |
+Environment variables are read only by the optional ESM preload (`instrumentation/preload.mjs`, loaded via `NODE_OPTIONS="--import ..."`), which runs before OpenClaw parses plugin config and sets up its own trace exporter for Traceloop LLM-client spans:
 
-Config file values take precedence over environment variables.
+| Variable | Read by | Description |
+|----------|---------|-------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | preload only | OTLP/HTTP base endpoint for the preload's trace exporter (default `http://localhost:4318`; `/v1/traces` is appended). |
+| `OTEL_SERVICE_NAME` | preload only | `service.name` for the preload's spans (default `openclaw-gateway`). |
+| `OPENCLAW_OTEL_CAPTURE_CONTENT` | preload only | Legacy single-boolean flag for Traceloop content capture. `true` enables prompt/completion text on LLM-client spans. See [captureContent (gateway-launch setting)](#capturecontent-gateway-launch-setting). |
+| `OPENCLAW_OTEL_CONTENT_POLICY` | preload only | Granular policy JSON (ISI-1000). When set, takes precedence over the legacy boolean. Same shape as the plugin's `captureContent` object form. |
+
+`OTEL_EXPORTER_OTLP_PROTOCOL` is not read by either — the preload always exports OTLP/HTTP (protobuf). If you use the preload, set these to match the plugin config so both exporters send to the same place. The plugin's `start()` phase overwrites `OPENCLAW_OTEL_CAPTURE_CONTENT`/`OPENCLAW_OTEL_CONTENT_POLICY` in its own process environment from the plugin config, so subprocesses it spawns inherit the plugin's policy.
 
 ## Trace Sampling
 
@@ -318,9 +400,11 @@ The plugin exports 100% of traces by default. For high-traffic gateways this can
 ```json
 {
   "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
     "entries": {
       "otel-observability": {
         "enabled": true,
+        "hooks": { "allowConversationAccess": true },
         "config": {
           "sampleRate": 0.1
         }
@@ -334,7 +418,7 @@ Semantics:
 
 - `sampleRate` omitted — the SDK default sampler (`parentbased_always_on`) is used. The plugin does not construct its own sampler; nothing sampler-related appears in the boot log.
 - `sampleRate: 1.0` — the plugin explicitly constructs `ParentBased(TraceIdRatio(1.0))`. Behaviourally equivalent to always-on, but the boot log reports `sampler=parentbased_traceidratio(1)` so operators can confirm the plugin took the sampling code path.
-- `0.0` — drop every trace.
+- `0.0` — drop every trace: no spans are recorded or exported. Metrics and logs are unaffected.
 - Any value in between — keep that fraction of root traces.
 
 Sampling is head-based and parent-respecting: the plugin wires a `ParentBasedSampler` around a `TraceIdRatioBasedSampler`. The root span of a trace makes the sampling decision based on the trace ID; child spans inherit the parent's decision so distributed traces stay coherent and you never see "half a trace".
@@ -536,8 +620,10 @@ Plugin hot reload can apply log pipeline changes (`logs` and `logConfig`), but i
 Check the current config:
 
 ```bash
-cat ~/.openclaw/openclaw.json | jq '.diagnostics'
+cat ~/.openclaw/openclaw.json | jq '.plugins.entries["otel-observability"]'
 ```
+
+Also confirm `plugins.load.paths` points at your clone: `jq '.plugins.load'`.
 
 ### Invalid Config Errors?
 

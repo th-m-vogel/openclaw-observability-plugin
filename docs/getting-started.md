@@ -45,7 +45,7 @@ Send a message to your agent and check your backend for:
 - **Traces:** `openclaw.model.usage`, `openclaw.message.processed`
 - **Logs:** Gateway logs with severity and code location
 
-> If you also installed Option 2 (this repo's custom plugin), the metrics from the custom plugin are different: `openclaw.llm.tokens.{total,prompt,completion}`, `openclaw.llm.cost.usd`, and the OTel stable `gen_ai.*` set.
+> Option 2 (this repo's plugin) emits a different metric set: `openclaw.llm.tokens.{total,prompt,completion}`, `openclaw.llm.cost.usd`, and the OTel stable `gen_ai.*` set. Use one option or the other, not both — see [Don't run both plugins at once](#dont-run-both-plugins-at-once).
 
 ---
 
@@ -116,31 +116,37 @@ First, confirm the plugin is wired into the gateway. Tail the gateway log during
 journalctl --user -u openclaw-gateway -f | grep -E '\[otel\]'
 ```
 
-You should see these lines **during `register()`** (before the gateway accepts traffic):
+You should see these lines **during `register()`** (before the gateway accepts traffic). The plugin logs one `Registered ...` line per hook — about 30 in total — so this is an abbreviated excerpt, not the full list:
 
 ```
 [otel] Registered message_received hook (via api.on)
+[otel] Registered session_start hook (via api.on)
+...
 [otel] Registered before_model_resolve hook (via api.on)
-[otel] Registered before_prompt_build hook (via api.on)
-[otel] Registered tool_result_persist hook (via api.on)
+...
 [otel] Registered agent_end hook (via api.on)
+...
 [otel] Registered command event hooks (via api.registerHook)
 [otel] Registered gateway:startup hook (via api.registerHook)
+[otel] Telemetry + hooks initialized at register() (runner-compatible)
 ```
 
 Then, **during `start()`** (after the gateway is ready):
 
 ```
-[otel] Starting OpenTelemetry observability...
-[otel] ✅ Observability pipeline active
+[otel] Starting OpenTelemetry observability (gateway-only init)...
+[otel] ✅ Observability pipeline active (gateway-side)
 [otel]   Traces=true Metrics=true Logs=true
-[otel]   Endpoint=http://localhost:4318 (http)
+[otel]   Endpoint=http://localhost:4318 (http, shared default)
+[otel]   Effective endpoints: traces=http://localhost:4318 metrics=http://localhost:4318 logs=http://localhost:4318
 ```
 
-Now send a message that triggers tool calls (e.g., "read my AGENTS.md file"). On each inbound message, debug-level logs confirm hooks are firing:
+The `Effective endpoints` line shows each signal's resolved base endpoint, including any `signalEndpoints` override (see [Configuration](./configuration.md#per-signal-endpoints-multi-backend-fan-out)). For the shared `endpoint` over HTTP, the exporters append `/v1/traces`, `/v1/metrics`, `/v1/logs` to it; overrides are used verbatim.
+
+Now send a message that triggers tool calls (e.g., "read my AGENTS.md file"). On each inbound message, info-level log lines confirm hooks are firing:
 
 ```
-[otel] Root span started for session=<sessionKey>
+[otel] Root span started: session=<sessionKey>, spanId=<spanId>, storeSize=<n>
 [otel] Agent turn span started: agent=<agentId>, session=<sessionKey>
 ```
 
@@ -149,7 +155,7 @@ In your backend you should see a connected trace:
 ```
 openclaw.request
 └── openclaw.agent.turn
-    └── tool.Read
+    └── execute_tool Read
 ```
 
 ---
@@ -210,48 +216,64 @@ The official `diagnostics-otel` plugin and this one both initialize the OpenTele
 
 ### Dynatrace (Direct)
 
-No collector needed:
+No collector needed. Plugin config (Option 2):
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "https://{environment-id}.live.dynatrace.com/api/v2/otlp",
-      "headers": {
-        "Authorization": "Api-Token {your-token}"
-      },
-      "serviceName": "openclaw-gateway",
-      "traces": true,
-      "metrics": true,
-      "logs": true
+  "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": {
+          "endpoint": "https://{environment-id}.live.dynatrace.com/api/v2/otlp",
+          "headers": {
+            "Authorization": "Api-Token {your-token}"
+          },
+          "serviceName": "openclaw-gateway",
+          "traces": true,
+          "metrics": true,
+          "logs": true
+        }
+      }
     }
   }
 }
 ```
+
+If you're using Option 1 (the official plugin) instead, the same `endpoint`/`headers` values go in its `diagnostics.otel` block.
 
 **Required scopes:** `metrics.ingest`, `logs.ingest`, `openTelemetryTrace.ingest`
 
 ### Grafana Cloud
 
+Plugin config (Option 2):
+
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "https://otlp-gateway-{region}.grafana.net/otlp",
-      "headers": {
-        "Authorization": "Basic {base64(instanceId:apiKey)}"
-      },
-      "serviceName": "openclaw-gateway",
-      "traces": true,
-      "metrics": true
+  "plugins": {
+    "load": { "paths": ["~/.openclaw/plugins/otel-observability"] },
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": {
+          "endpoint": "https://otlp-gateway-{region}.grafana.net/otlp",
+          "headers": {
+            "Authorization": "Basic {base64(instanceId:apiKey)}"
+          },
+          "serviceName": "openclaw-gateway",
+          "traces": true,
+          "metrics": true
+        }
+      }
     }
   }
 }
 ```
+
+If you're using Option 1 (the official plugin) instead, the same `endpoint`/`headers` values go in its `diagnostics.otel` block.
 
 ---
 
@@ -269,10 +291,11 @@ No collector needed:
    curl -v http://localhost:4318/v1/traces
    ```
 
-3. Check diagnostics config:
+3. Check the plugin config (Option 2):
    ```bash
-   cat ~/.openclaw/openclaw.json | jq '.diagnostics'
+   cat ~/.openclaw/openclaw.json | jq '.plugins.entries["otel-observability"]'
    ```
+   If you're using Option 1 (the official plugin), check `jq '.diagnostics'` instead.
 
 ### Custom plugin not loading?
 
@@ -294,7 +317,7 @@ The custom plugin requires messages to flow through the normal pipeline. Heartbe
 
 ### Hooks register but never fire
 
-**Symptom:** Gateway logs `[otel] ✅ Observability pipeline active`, but no `openclaw.request` or `tool.*` spans reach your backend when you send messages.
+**Symptom:** Gateway logs `[otel] ✅ Observability pipeline active (gateway-side)`, but no `openclaw.request` or `execute_tool *` spans reach your backend when you send messages.
 
 **Cause (pre-PR #6):** Earlier builds registered typed hooks from inside the async `service.start()` phase. OpenClaw snapshots typed hooks at plugin registration time — ~30 s before `start()` runs — so the gateway never saw the 15 hook listeners. Tracked as [ISI-515](https://github.com/henrikrexed/openclaw-observability-plugin/pull/6).
 
@@ -302,20 +325,20 @@ The custom plugin requires messages to flow through the normal pipeline. Heartbe
 
 **How to confirm hooks are live:**
 
-1. During gateway startup, look for all six registration lines from `register()`:
+1. During gateway startup, look for the `Registered ...` lines from `register()` — one per hook, about 30 in total. A representative subset:
    ```
    [otel] Registered message_received hook (via api.on)
-   [otel] Registered before_agent_start hook (via api.on)
+   [otel] Registered before_model_resolve hook (via api.on)
    [otel] Registered tool_result_persist hook (via api.on)
    [otel] Registered agent_end hook (via api.on)
    [otel] Registered command event hooks (via api.registerHook)
    [otel] Registered gateway:startup hook (via api.registerHook)
    ```
-   If these are missing, the plugin is not loaded — recheck `plugins.load.paths` and clear `/tmp/jiti`.
+   If these are missing, either the plugin is not loaded — recheck `plugins.load.paths` and clear `/tmp/jiti` — or it was loaded in a non-`full` registration mode, in which case the log shows `[otel] Non-full registration (<mode>) detected — skipping telemetry init` instead. That line is expected for one-shot CLI commands and internal discovery passes; the gateway's own registration should not produce it.
 
-2. Send a real message through the pipeline and enable debug logging. You should see:
+2. Send a real message through the pipeline. These lines are logged at info level, so no debug logging is needed:
    ```
-   [otel] Root span started for session=<sessionKey>
+   [otel] Root span started: session=<sessionKey>, spanId=<spanId>, storeSize=<n>
    [otel] Agent turn span started: agent=<agentId>, session=<sessionKey>
    ```
    If registration lines are present but these are missing, the gateway is not firing hooks for that event path (e.g., heartbeats skip `message_received`).

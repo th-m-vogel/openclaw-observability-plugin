@@ -26,7 +26,7 @@ timeseries events = sum(openclaw.security.sensitive_file_access)
 ### Span Query — Detailed forensics
 ```dql
 fetch spans
-| filter span.name == "tool.Read" or span.name == "tool.Write" or span.name == "tool.Edit"
+| filter span.name == "execute_tool Read" or span.name == "execute_tool Write" or span.name == "execute_tool Edit" or span.name == "execute_tool read" or span.name == "execute_tool write" or span.name == "execute_tool edit"
 | filter security.event.detected == true
 | filter security.event.detection == "sensitive_file_access"
 | fields timestamp, span.name, security.event.severity, security.event.description, openclaw.session.key, openclaw.tool.input_preview
@@ -97,7 +97,7 @@ timeseries events = sum(openclaw.security.dangerous_command)
 ### Span Query — Detailed forensics
 ```dql
 fetch spans
-| filter span.name == "tool.exec"
+| filter span.name == "execute_tool exec" or span.name == "execute_tool Exec"
 | filter security.event.detected == true
 | filter security.event.detection == "dangerous_command"
 | fields timestamp, security.event.severity, security.event.description, openclaw.session.key, openclaw.tool.input_preview

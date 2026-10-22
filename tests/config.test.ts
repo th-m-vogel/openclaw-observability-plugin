@@ -456,4 +456,20 @@ describe("openclaw.plugin.json manifest parity", () => {
       expect(schemaKeys.has(key), `configSchema.properties is missing "${key}" — the manifest's additionalProperties: false will reject this option at runtime`).toBe(true);
     }
   });
+
+  it("every ContentCapturePolicy key is declared in the captureContent object schema's properties (ISI-9800)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const manifestPath = path.join(__dirname, "..", "openclaw.plugin.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+    const objectVariant = manifest.configSchema.properties.captureContent.oneOf.find(
+      (v: { type?: string }) => v.type === "object",
+    );
+    const declaredKeys = new Set(Object.keys(objectVariant.properties));
+
+    const fullPolicy = parseConfig({ captureContent: true }).captureContent;
+    for (const key of Object.keys(fullPolicy)) {
+      expect(declaredKeys.has(key), `captureContent's object schema is missing "${key}"`).toBe(true);
+    }
+  });
 });

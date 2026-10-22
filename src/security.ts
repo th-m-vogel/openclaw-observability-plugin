@@ -23,18 +23,23 @@ const SENSITIVE_FILE_PATTERNS = [
   /\.ssh\//i,
   /id_rsa/i,
   /id_ed25519/i,
-  /credentials/i,
+  /\bcredentials?\b/i,
   /\.aws\/credentials/i,
   /\.kube\/config/i,
   /\.docker\/config\.json/i,
   /\.netrc/i,
   /\.pgpass/i,
   /\.my\.cnf/i,
-  /password/i,
-  /secret/i,
-  /token/i,
-  /api[_-]?key/i,
-  /private[_-]?key/i,
+  // Word-boundary anchored: a bare substring match (e.g. `/secret/i`)
+  // false-positives on ordinary project paths that merely contain the
+  // word as part of a longer identifier (`tokenizer.ts`, `telemetry/`) —
+  // see ISI-9800. `\b` keeps real credential-shaped names (`password.txt`,
+  // `api-key.json`, `private_key.pem`) matching.
+  /\bpassword\b/i,
+  /\bsecrets?\b/i,
+  /\btokens?\b/i,
+  /\bapi[_-]?keys?\b/i,
+  /\bprivate[_-]?keys?\b/i,
 ];
 
 /** Detection 2: Prompt injection patterns */
@@ -307,7 +312,7 @@ export function enrichSpanWithSecurityEvent(
   if (event.severity === "critical" || event.severity === "high") {
     span.setStatus({
       code: SpanStatusCode.ERROR,
-      message: `Security: ${event.detection} - ${event.description}`,
+      message: `Security: ${event.detection} - ${redactSensitiveText(event.description)}`,
     });
   }
   
@@ -424,72 +429,3 @@ export function checkMessageSecurity(
   
   return null;
 }
-
-// ═══════════════════════════════════════════════════════════════════
-// DYNATRACE METRIC QUERIES (for Detection 4: Token Spike)
-// ═══════════════════════════════════════════════════════════════════
-
-/**
- * Dynatrace metric selector for token spike detection.
- * Use this in Dynatrace Custom Events / Metric Alerts.
- * 
- * Detection 4: Token Spike Anomaly
- * Metric: openclaw.llm.tokens.total
- * Condition: rate(5m) > 3x avg(rate(1h), offset=1d)
- * 
- * DQL Query for Dynatrace:
- * ```
- * timeseries usage = sum(openclaw.llm.tokens.total), by:{gen_ai.response.model}
- * | fieldsAdd baseline = rollup(avg, 1h, offset:-1d)
- * | fieldsAdd current = rollup(sum, 5m)
- * | filter current > baseline * 3
- * ```
- */
-export const DYNATRACE_TOKEN_SPIKE_QUERY = `
-timeseries {
-  current = sum(openclaw.llm.tokens.total),
-  baseline = sum(openclaw.llm.tokens.total, shift:-1d)
-}
-| fieldsAdd spike_ratio = current / baseline
-| filter spike_ratio > 3
-| summarize alert_count = count()
-`.trim();
-
-/**
- * Dynatrace metric event configuration for security alerts.
- * Import this as JSON in Dynatrace Settings > Anomaly Detection > Metric Events.
- */
-export const DYNATRACE_SECURITY_METRIC_EVENTS = {
-  sensitiveFileAccess: {
-    name: "OpenClaw: Sensitive File Access",
-    description: "Detects attempts to access sensitive files like .env, credentials, SSH keys",
-    metricSelector: "openclaw.security.sensitive_file_access:count",
-    threshold: 0,
-    operator: "ABOVE",
-    severity: "CRITICAL",
-  },
-  promptInjection: {
-    name: "OpenClaw: Prompt Injection Attempt",
-    description: "Detects potential prompt injection patterns in user messages",
-    metricSelector: "openclaw.security.prompt_injection:count",
-    threshold: 0,
-    operator: "ABOVE",
-    severity: "HIGH",
-  },
-  dangerousCommand: {
-    name: "OpenClaw: Dangerous Command Execution",
-    description: "Detects dangerous shell commands like rm -rf, curl exfiltration",
-    metricSelector: "openclaw.security.dangerous_command:count",
-    threshold: 0,
-    operator: "ABOVE",
-    severity: "HIGH",
-  },
-  tokenSpike: {
-    name: "OpenClaw: Token Usage Spike",
-    description: "Detects sudden spikes in token usage (3x baseline)",
-    metricSelector: "openclaw.llm.tokens.total:rate(5m)",
-    threshold: "3x avg(1h offset 1d)",
-    operator: "ABOVE",
-    severity: "WARNING",
-  },
-};

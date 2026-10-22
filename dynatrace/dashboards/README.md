@@ -10,14 +10,14 @@ Pre-built Dynatrace dashboard JSON for monitoring OpenClaw AI agent operations.
 
 | # | Section | DQL Metrics | Visualization |
 |---|---------|-------------|---------------|
-| 1 | **Overview** | Agent count, monthly cost, health score, active issues | Single value tiles |
+| 1 | **Overview** | Active agent count, monthly cost | Single value tiles |
 | 2 | **Token Usage** | `gen_ai.client.token.usage` by model/type, cache hit rate | Bar + line charts |
-| 3 | **Cost by Agent** | `paperclip.cost.cents`, `openclaw.llm.cost_usd` by agent/model | Bar + area charts |
+| 3 | **Cost** | `openclaw.llm.cost.usd` by provider/model | Bar + area charts |
 | 4 | **Agent Performance** | `gen_ai.client.operation.duration` by provider, tool call frequency | Line + bar charts |
-| 5 | **Issue Flow** | `paperclip.issues.count` by status, completion rate | Area + line charts |
-| 6 | **Budget Utilization** | `paperclip.budget.utilization` by agent, status table | Line chart + table |
-| 7 | **Security** | `openclaw.security.*` events, recent incidents from spans | Line chart + table |
-| 8 | **V3 spans & GenAI metrics** | `chat <model>` / `execute_tool <name>` / `openclaw.dispatch.prepare` spans + stable `gen_ai.client.*` metrics from `openclaw-o11y-plugin` | Tables + line/area charts |
+| 5 | **Security** | `openclaw.security.*` events, recent incidents from spans | Line chart + table |
+| 6 | **V3 spans & GenAI metrics** | `chat <model>` / `execute_tool <name>` / `openclaw.dispatch.prepare` spans + stable `gen_ai.client.*` metrics | Tables + line/area charts |
+
+Other files in this directory: `openclaw-overview-dashboard-plugin-only.json` (built only from this plugin's own `openclaw.*` metrics, spans, and logs), plus `-v3`/`-v4` variants of the overview.
 
 ### Import
 
@@ -27,20 +27,18 @@ Pre-built Dynatrace dashboard JSON for monitoring OpenClaw AI agent operations.
 
 ### Prerequisites
 
-- OpenClaw custom plugin or official diagnostics-otel enabled
-- OTel Collector forwarding to Dynatrace OTLP endpoint
-- For Paperclip metrics: Paperclip control plane exporting metrics
-- For security tiles: Tetragon + security detection module active
+- This plugin (`otel-observability`) enabled — the tiles query its metric and span names, not the official `diagnostics-otel` plugin's
+- Telemetry reaching Dynatrace, either directly via OTLP or through an OTel Collector
+- For security tiles: this plugin's security detection module (always on); Tetragon is optional
 
 ### Metric Sources
 
 | Metric | Source |
 |--------|--------|
-| `gen_ai.client.token.usage` | Custom plugin (agent_end hook) |
-| `gen_ai.client.operation.duration` | Custom plugin (agent turns) |
-| `openclaw.llm.cost_usd` | Diagnostics API integration |
-| `openclaw.security.*` | Security detection module |
-| `paperclip.*` | Paperclip control plane |
+| `gen_ai.client.token.usage` | This plugin — `model.call.completed`/`model.call.error` diagnostic events (once per real model call) |
+| `gen_ai.client.operation.duration` | This plugin — `model_call_ended` hook (per real call) and `agent_end` hook (per agent turn) |
+| `openclaw.llm.cost.usd` | This plugin — `model.usage` diagnostic event (once per agent turn) |
+| `openclaw.security.*` | This plugin's security detection module |
 
 ### Customization
 

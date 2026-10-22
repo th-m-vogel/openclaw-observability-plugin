@@ -1,8 +1,8 @@
 site_name: OpenClaw Observability Plugin
 site_description: OpenTelemetry observability for OpenClaw AI agents — traces, metrics, and logs
-site_url: https://henrikrexed.github.io/openclaw-observability-plugin
-repo_url: https://github.com/henrikrexed/openclaw-observability-plugin
-repo_name: henrikrexed/openclaw-observability-plugin
+site_url: https://th-m-vogel.github.io/openclaw-observability-plugin
+repo_url: https://github.com/th-m-vogel/openclaw-observability-plugin
+repo_name: th-m-vogel/openclaw-observability-plugin
 edit_uri: edit/main/docs/
 
 theme:
@@ -86,6 +86,4 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/henrikrexed/openclaw-observability-plugin
-    - icon: fontawesome/brands/youtube
-      link: https://youtube.com/@IsItObservable
+      link: https://github.com/th-m-vogel/openclaw-observability-plugin

@@ -31,6 +31,8 @@ Only this fork's own work is listed here — see [`CHANGELOG.md`](CHANGELOG.md) 
 **`0.12.0-dev`:**
 - New opt-in `collapseEphemeralSessions` config flag: collapses ephemeral per-run session-key shapes (recurring cron jobs, internal-session-effect turns) to a stable, job-level identifier on metric labels only, without touching trace spans or log lines, which always keep the full per-run session key. A dashboard-legibility feature first — fewer, more readable rows for a recurring job's "tokens by session" panel — though as a side effect it can also make a recurring job's `rate()`/`increase()` queries work once its collapsed series has accumulated more than one sample. Default `false`, fully backward-compatible with existing dashboards. See [`docs/telemetry/metrics.md`](docs/telemetry/metrics.md) and [`docs/configuration.md`](docs/configuration.md).
 - New opt-in `enableByModelMetrics` config flag (default `false`): adds a `_by_model` sibling for every per-conversation LLM metric, the feature built specifically to make `rate()`/`increase()` reliably work regardless of how often a session recurs — unlike `collapseEphemeralSessions`'s side effect above, this doesn't depend on a session recurring at all. Off by default because it roughly doubles LLM metric data-point volume, which has a direct cost impact on a billed-by-volume managed metrics backend — check its pricing before enabling. See [`docs/telemetry/metrics.md`](docs/telemetry/metrics.md#_by_model-metrics-opt-in).
+- New metrics sourced from real OpenClaw core diagnostic events: `openclaw.skill.used`, `openclaw.model.failover`, and `openclaw.tool.loop` (runaway tool-call loop detection). See [`docs/telemetry/metrics.md`](docs/telemetry/metrics.md).
+- Removed metrics/attributes that read fields OpenClaw never actually emits: the `openclaw.llm.tokens.system`/`.user`/`.tool_result`/`.skill` token breakdown (and their `_by_model` siblings) and the `openclaw.context.*` prompt-build attributes. They never carried data, so no working dashboard loses anything — but delete any panels that reference them.
 - Dependency catch-up: OpenTelemetry API/SDK/exporter packages and `@traceloop/node-server-sdk` bumped to their current stable releases. **Build-time TypeScript moved to 7.x**, the native Go-ported compiler ("tsgo") rather than a version bump of the old pure-JS `tsc` — building from source now resolves a platform-specific native binary as an optional dependency, same pattern as `esbuild`/`@next/swc`. No published package or runtime behavior changes as a result (`typescript` is a devDependency only; `dist/` output is unaffected).
 
 **`0.11.0`:**
@@ -77,7 +79,7 @@ This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plu
    npm ci && npm run build
    ```
 
-2. Point `openclaw.json` at the clone and enable it. This example enables metrics only (traces and logs off) against one shared OTLP endpoint and header — a reasonable minimal starting point, since metrics alone already cover token/cost/latency dashboards without the extra volume of full tracing. Flip `traces`/`logs` to `true` once you want the full picture, and see [Configuration](./docs/configuration.md#per-signal-endpoints-multi-backend-fan-out) if you need to route signals to different URLs/credentials instead:
+2. Point `openclaw.json` at the clone and enable it. This example enables traces and metrics (logs off) against one shared OTLP endpoint and header — a reasonable starting point: metrics cover token/cost/latency dashboards, and traces let you verify the install in step 4 by seeing a real request's span tree. Set `traces` to `false` if you only want metrics and don't need the extra volume of full tracing, flip `logs` to `true` once you also want this plugin's log lines exported, and see [Configuration](./docs/configuration.md#per-signal-endpoints-multi-backend-fan-out) if you need to route signals to different URLs/credentials instead:
    ```json
    {
      "plugins": {
@@ -90,7 +92,7 @@ This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plu
              "endpoint": "https://otlp-collector.example.com",
              "headers": { "Authorization": "Bearer ${OTEL_API_KEY}" },
              "serviceName": "openclaw-gateway",
-             "traces": false,
+             "traces": true,
              "metrics": true,
              "logs": false,
              "captureContent": false
@@ -114,15 +116,15 @@ This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plu
    ```bash
    journalctl --user -u openclaw-gateway -f | grep -E '\[otel\]'
    ```
-   Send a message, then check your backend for an `openclaw.request` span with at least one `openclaw.agent.turn` child.
+   Send a message, then check your backend for an `openclaw.request` span with at least one `openclaw.agent.turn` child. (If you set `traces` to `false`, check for the `openclaw.llm.requests` metric instead — it appears after the next metrics export, every 30s by default.)
 
 Full walkthrough, every config option, and backend-specific examples (Dynatrace, Grafana Cloud, generic OTLP collector): [Getting Started](./docs/getting-started.md), [Configuration](./docs/configuration.md), [Backends](./docs/backends/index.md).
 
 ## Known limitations
 
-The one worth knowing before you start debugging a dashboard: **`rate()`/`increase()` panels can show zero cost/tokens for a session even though the data arrived correctly.** `openclaw.llm.cost.usd` and the token-breakdown metrics carry a per-conversation ID label, so a conversation whose calls all land in a single sample — a one-shot isolated cron/background session, or any conversation whose calls complete within one 30s export tick — produces only one sample for that series, with nothing earlier to diff against. An instant query finds the value fine; a windowed `rate()`/`increase()`, even grouped down to just `model`, silently contributes `0` for that series. This looks identical to "no data," but it isn't — see [Limitations](./docs/limitations.md) for the mechanism and the query workaround. Every per-conversation LLM metric now has an opt-in `_by_model` sibling (`enableByModelMetrics`, default off) built specifically to be rate-able — see [Metrics Reference](./docs/telemetry/metrics.md#_by_model-metrics-opt-in).
+The one worth knowing before you start debugging a dashboard: **`rate()`/`increase()` panels can show zero cost/tokens for a session even though the data arrived correctly.** `openclaw.llm.cost.usd` and the `openclaw.llm.tokens.*` metrics carry a per-conversation ID label, so a conversation whose calls all land in a single sample — a one-shot isolated cron/background session, or any conversation whose calls complete within one 30s export tick — produces only one sample for that series, with nothing earlier to diff against. An instant query finds the value fine; a windowed `rate()`/`increase()`, even grouped down to just `model`, silently contributes `0` for that series. This looks identical to "no data," but it isn't — see [Limitations](./docs/limitations.md) for the mechanism and the query workaround. Every per-conversation LLM metric now has an opt-in `_by_model` sibling (`enableByModelMetrics`, default off) built specifically to be rate-able — see [Metrics Reference](./docs/telemetry/metrics.md#_by_model-metrics-opt-in).
 
-Separately: **cost and token-breakdown reporting depend entirely on an OpenClaw core event (`model.usage`) that doesn't fire for every session type** — confirmed gaps include per-channel/topic model overrides, internal/background agent-turn sessions, and multi-call tool-use continuation steps (each tracked upstream as its own issue). Real per-call *token counts* still arrive correctly through a separate, more reliable event in all of these cases — only cost and the token-type breakdown go missing. There's no plugin-side fix for an event core never emits.
+Separately: **cost reporting depends entirely on an OpenClaw core event (`model.usage`) that doesn't fire for every session type** — confirmed gaps include per-channel/topic model overrides, internal/background agent-turn sessions, and multi-call tool-use continuation steps (each tracked upstream as its own issue). Real per-call *token counts* still arrive correctly through a separate, more reliable event in all of these cases — only cost goes missing. There's no plugin-side fix for an event core never emits.
 
 Also: custom/self-hosted OpenAI-compatible providers always report `cost: undefined` (structural — no cost field exists in that API spec, by design), and zero-code auto-instrumentation isn't possible for this ecosystem (ESM/CJS isolation breaks it) — all telemetry comes from typed hooks and diagnostic events instead.
 

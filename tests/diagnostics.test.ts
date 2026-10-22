@@ -1118,3 +1118,31 @@ describe("minimum OpenClaw version check", () => {
     expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining("minimum supported version"));
   });
 });
+
+describe("required OpenClaw version check (manifest floor, ISI-9700 crash fix)", () => {
+  it("warns when the installed OpenClaw version is below the manifest's minOpenClawVersion (no local crash guard remains)", async () => {
+    const root = makeInstallRoot();
+    writeOpenclawPackageJson(root, "2026.9.8");
+    writeChunk(root, "export function onInternalDiagnosticEvent() { return () => undefined; }\n");
+    const logger = createLogger();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), logger);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Detected OpenClaw v2026.9.8, below v2026.9.9",
+      ),
+    );
+  });
+
+  it("does not warn about the manifest floor when the installed version meets it", async () => {
+    const root = makeInstallRoot();
+    writeOpenclawPackageJson(root, "2026.9.9");
+    writeChunk(root, "export function onInternalDiagnosticEvent() { return () => undefined; }\n");
+    const logger = createLogger();
+
+    await registerWithEntry(path.join(root, "openclaw.mjs"), logger);
+
+    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining("openclaw/openclaw#162031"));
+  });
+});

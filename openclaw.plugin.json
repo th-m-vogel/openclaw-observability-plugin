@@ -42,7 +42,7 @@
     },
     "captureContent": {
       "label": "Capture Prompt/Completion Content",
-      "help": "Accepts `true` / `false` (legacy, all-on or all-off) or a granular ContentCapturePolicy object with the per-category flags `inputMessages`, `outputMessages`, `toolInputs`, `toolOutputs`, `systemPrompt`. Default is everything off."
+      "help": "Accepts `true` / `false` (legacy, all-on or all-off) or a granular ContentCapturePolicy object with the per-category flags `inputMessages`, `outputMessages`, `toolInputs`, `toolOutputs`, `toolErrorMessages`, `systemPrompt`. Default is everything off, except `toolErrorMessages` which defaults to true even in object form (operational data, not full content capture)."
     },
     "metricsIntervalMs": {
       "label": "Metrics Export Interval (ms)",
@@ -146,6 +146,10 @@
               "toolOutputs": {
                 "type": "boolean",
                 "description": "Capture tool-call result text on the execute_tool span."
+              },
+              "toolErrorMessages": {
+                "type": "boolean",
+                "description": "Capture bounded, redacted error text from failed tool calls (openclaw.tool.error_preview). Unlike the other categories, this defaults to true even when the object form otherwise has every other flag off — error messages are operational data, not full content capture. Set to false to suppress entirely."
               },
               "systemPrompt": {
                 "type": "boolean",

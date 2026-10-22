@@ -10,7 +10,7 @@
     "1": {
       "type": "data",
       "title": "Total Agents Active",
-      "query": "timeseries count = count(gen_ai.client.operation.duration), by:{gen_ai.agent.name}\n| summarize agents = countDistinct(gen_ai.agent.name)",
+      "query": "timeseries count = count(gen_ai.client.operation.duration), by:{gen_ai.agent.id}\n| summarize agents = countDistinct(gen_ai.agent.id)",
       "queryConfig": {
         "additionalFilters": {},
         "version": "4.3.1",
@@ -33,7 +33,7 @@
     "2": {
       "type": "data",
       "title": "Monthly Token Cost (USD)",
-      "query": "timeseries cost = sum(openclaw.llm.cost_usd)\n| summarize total_cost = sum(cost)\n| fieldsAdd total_cost = round(total_cost, decimals: 2)",
+      "query": "timeseries cost = sum(openclaw.llm.cost.usd)\n| summarize total_cost = sum(cost)\n| fieldsAdd total_cost = round(total_cost, decimals: 2)",
       "subType": "singleValue",
       "visualization": "singleValue",
       "visualizationSettings": {
@@ -52,41 +52,6 @@
         }
       }
     },
-    "3": {
-      "type": "data",
-      "title": "Avg Agent Health Score",
-      "query": "timeseries avg_health = avg(paperclip.agent.health.score), by:{agent_name}\n| summarize overall = avg(avg_health)",
-      "subType": "singleValue",
-      "visualization": "singleValue",
-      "visualizationSettings": {
-        "thresholds": [
-          { "field": "overall", "title": "Health", "isEnabled": true, "rules": [
-            { "color": { "Default": "#dc172a" }, "comparator": "≥", "value": 0 },
-            { "color": { "Default": "#f5d30f" }, "comparator": "≥", "value": 50 },
-            { "color": { "Default": "#7dc540" }, "comparator": "≥", "value": 80 }
-          ]}
-        ],
-        "singleValue": {
-          "showLabel": true,
-          "label": "Health Score",
-          "prefixIcon": "HealthIcon"
-        }
-      }
-    },
-    "4": {
-      "type": "data",
-      "title": "Active Issues",
-      "query": "timeseries issues = avg(paperclip.issues.count), by:{status}\n| summarize total = sum(issues)",
-      "subType": "singleValue",
-      "visualization": "singleValue",
-      "visualizationSettings": {
-        "singleValue": {
-          "showLabel": true,
-          "label": "Active Issues",
-          "prefixIcon": "LogsWarningIcon"
-        }
-      }
-    },
     "5": {
       "type": "markdown",
       "title": "",
@@ -95,12 +60,12 @@
     "6": {
       "type": "data",
       "title": "Token Usage by Model & Type",
-      "query": "timeseries usage = sum(gen_ai.client.token.usage), by:{gen_ai.token.type, gen_ai.request.model}",
+      "query": "timeseries usage = sum(gen_ai.client.token.usage), by:{gen_ai.token.type, gen_ai.response.model}",
       "visualization": "categoricalBarChart",
       "visualizationSettings": {
         "chartSettings": {
           "categoricalBarChartSettings": {
-            "categoryAxis": "gen_ai.request.model",
+            "categoryAxis": "gen_ai.response.model",
             "categoryAxisLabel": "Model",
             "valueAxis": "usage",
             "valueAxisLabel": "Tokens"
@@ -134,12 +99,12 @@
     "9": {
       "type": "markdown",
       "title": "",
-      "content": "## 💰 Cost by Agent"
+      "content": "## 💰 Cost"
     },
     "10": {
       "type": "data",
-      "title": "Cost by Agent (USD)",
-      "query": "timeseries cost = sum(paperclip.cost.cents), by:{agent_id, model}\n| fieldsAdd cost_usd = cost / 100",
+      "title": "Cost by Provider & Model (USD)",
+      "query": "timeseries cost = sum(openclaw.llm.cost.usd), by:{gen_ai.provider.name, gen_ai.response.model}",
       "visualization": "barChart",
       "visualizationSettings": {
         "chartSettings": {
@@ -151,7 +116,7 @@
     "11": {
       "type": "data",
       "title": "Cost Trend — Last 30 Days",
-      "query": "timeseries cost = sum(openclaw.llm.cost_usd), by:{gen_ai.response.model}\n| fieldsAdd cumulative = running_sum(cost)",
+      "query": "timeseries cost = sum(openclaw.llm.cost.usd), by:{gen_ai.response.model}\n| fieldsAdd cumulative = running_sum(cost)",
       "visualization": "areaChart",
       "visualizationSettings": {
         "chartSettings": {
@@ -210,69 +175,6 @@
       "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and startsWith(span.name, \"execute_tool \")\n| fieldsAdd duration_ms = toDouble(duration) / 1000000\n| summarize avg_ms = avg(duration_ms), by:{span.name}\n| sort avg_ms desc\n| limit 10",
       "visualization": "barChart"
     },
-    "17": {
-      "type": "markdown",
-      "title": "",
-      "content": "## 📋 Issue Flow"
-    },
-    "18": {
-      "type": "data",
-      "title": "Issues by Status Over Time",
-      "query": "timeseries issues = avg(paperclip.issues.count), by:{status}",
-      "visualization": "areaChart",
-      "visualizationSettings": {
-        "chartSettings": {
-          "legend": { "position": "bottom" },
-          "leftYAxisSettings": { "label": "Issues" }
-        }
-      }
-    },
-    "19": {
-      "type": "data",
-      "title": "Issue Completion Rate",
-      "query": "timeseries {\n  done = avg(paperclip.issues.count, {status=\"done\"}),\n  total = avg(paperclip.issues.count)\n}\n| fieldsAdd completion_rate = if(total > 0, 100 * done / total, 0)",
-      "visualization": "lineChart",
-      "visualizationSettings": {
-        "chartSettings": {
-          "leftYAxisSettings": { "label": "Completion %" }
-        }
-      }
-    },
-    "20": {
-      "type": "markdown",
-      "title": "",
-      "content": "## 💸 Budget Utilization"
-    },
-    "21": {
-      "type": "data",
-      "title": "Budget Utilization by Agent",
-      "query": "timeseries utilization = avg(paperclip.budget.utilization), by:{agent_name}",
-      "visualization": "lineChart",
-      "visualizationSettings": {
-        "chartSettings": {
-          "legend": { "position": "bottom" },
-          "leftYAxisSettings": { "label": "Utilization %" }
-        },
-        "thresholds": [
-          { "field": "utilization", "isEnabled": true, "rules": [
-            { "color": { "Default": "#7dc540" }, "comparator": "≥", "value": 0 },
-            { "color": { "Default": "#f5d30f" }, "comparator": "≥", "value": 80 },
-            { "color": { "Default": "#dc172a" }, "comparator": "≥", "value": 100 }
-          ]}
-        ]
-      }
-    },
-    "22": {
-      "type": "data",
-      "title": "Budget Status Table",
-      "query": "timeseries {\n  util = avg(paperclip.budget.utilization),\n  cost = sum(paperclip.cost.cents)\n}, by:{agent_name}\n| fieldsAdd cost_usd = cost / 100\n| fieldsAdd status = if(util >= 100, \"🔴 Paused\", if(util >= 80, \"🟡 Warning\", \"🟢 OK\"))",
-      "visualization": "table",
-      "visualizationSettings": {
-        "table": {
-          "enableLineWrap": true
-        }
-      }
-    },
     "23": {
       "type": "markdown",
       "title": "",
@@ -299,7 +201,7 @@
     "26": {
       "type": "markdown",
       "title": "",
-      "content": "## 🧪 V3 spans & GenAI metrics (otel-observability plugin)\n\nThese tiles read from the V3 span structure (`chat <model>`, `execute_tool <name>`, `openclaw.dispatch.prepare`) and the stable OTel GenAI metrics (`gen_ai.client.token.usage`, `gen_ai.client.operation.duration`) emitted by the `openclaw-o11y-plugin`. The token-charts above (`openclaw.tokens`) still source from the built-in `diagnostics-otel` plugin."
+      "content": "## 🧪 V3 spans & GenAI metrics (otel-observability plugin)\n\nThese tiles read from the V3 span structure (`chat <model>`, `execute_tool <name>`, `openclaw.dispatch.prepare`) and the stable OTel GenAI metrics (`gen_ai.client.token.usage`, `gen_ai.client.operation.duration`) emitted by the `otel-observability` plugin. The token charts above read the same `gen_ai.client.token.usage` metric."
     },
     "27": {
       "type": "data",
@@ -353,7 +255,7 @@
     "30": {
       "type": "data",
       "title": "Token Usage by Type & Model (gen_ai stable metric)",
-      "query": "timeseries token_usage = sum(gen_ai.client.token.usage), by:{gen_ai.token.type, gen_ai.request.model}, interval:10m",
+      "query": "timeseries token_usage = sum(gen_ai.client.token.usage), by:{gen_ai.token.type, gen_ai.response.model}, interval:10m",
       "queryConfig": {
         "additionalFilters": {},
         "datatype": "metrics",
@@ -370,7 +272,7 @@
     "31": {
       "type": "data",
       "title": "LLM Operation Duration p95 (gen_ai metric)",
-      "query": "timeseries p95 = percentile(gen_ai.client.operation.duration, 95, rollup:avg), by:{gen_ai.request.model}, interval:5m",
+      "query": "timeseries p95 = percentile(gen_ai.client.operation.duration, 95, rollup:avg), by:{gen_ai.response.model}, interval:5m",
       "queryConfig": {
         "additionalFilters": {},
         "datatype": "metrics",
@@ -404,10 +306,8 @@
   },
   "layouts": {
     "0": { "x": 0, "y": 0, "w": 24, "h": 2 },
-    "1": { "x": 0, "y": 2, "w": 6, "h": 4 },
-    "2": { "x": 6, "y": 2, "w": 6, "h": 4 },
-    "3": { "x": 12, "y": 2, "w": 6, "h": 4 },
-    "4": { "x": 18, "y": 2, "w": 6, "h": 4 },
+    "1": { "x": 0, "y": 2, "w": 12, "h": 4 },
+    "2": { "x": 12, "y": 2, "w": 12, "h": 4 },
     "5": { "x": 0, "y": 6, "w": 24, "h": 1 },
     "6": { "x": 0, "y": 7, "w": 12, "h": 6 },
     "7": { "x": 12, "y": 7, "w": 12, "h": 6 },
@@ -420,21 +320,15 @@
     "14": { "x": 12, "y": 26, "w": 12, "h": 6 },
     "15": { "x": 0, "y": 32, "w": 12, "h": 6 },
     "16": { "x": 12, "y": 32, "w": 12, "h": 6 },
-    "17": { "x": 0, "y": 38, "w": 24, "h": 1 },
-    "18": { "x": 0, "y": 39, "w": 14, "h": 6 },
-    "19": { "x": 14, "y": 39, "w": 10, "h": 6 },
-    "20": { "x": 0, "y": 45, "w": 24, "h": 1 },
-    "21": { "x": 0, "y": 46, "w": 14, "h": 6 },
-    "22": { "x": 14, "y": 46, "w": 10, "h": 6 },
-    "23": { "x": 0, "y": 52, "w": 24, "h": 1 },
-    "24": { "x": 0, "y": 53, "w": 14, "h": 6 },
-    "25": { "x": 14, "y": 53, "w": 10, "h": 6 },
-    "26": { "x": 0, "y": 59, "w": 24, "h": 2 },
-    "27": { "x": 0, "y": 61, "w": 12, "h": 6 },
-    "28": { "x": 12, "y": 61, "w": 12, "h": 6 },
-    "29": { "x": 0, "y": 67, "w": 12, "h": 6 },
-    "30": { "x": 12, "y": 67, "w": 12, "h": 6 },
-    "31": { "x": 0, "y": 73, "w": 12, "h": 4 },
-    "32": { "x": 12, "y": 73, "w": 12, "h": 4 }
+    "23": { "x": 0, "y": 38, "w": 24, "h": 1 },
+    "24": { "x": 0, "y": 39, "w": 14, "h": 6 },
+    "25": { "x": 14, "y": 39, "w": 10, "h": 6 },
+    "26": { "x": 0, "y": 45, "w": 24, "h": 2 },
+    "27": { "x": 0, "y": 47, "w": 12, "h": 6 },
+    "28": { "x": 12, "y": 47, "w": 12, "h": 6 },
+    "29": { "x": 0, "y": 53, "w": 12, "h": 6 },
+    "30": { "x": 12, "y": 53, "w": 12, "h": 6 },
+    "31": { "x": 0, "y": 59, "w": 12, "h": 4 },
+    "32": { "x": 12, "y": 59, "w": 12, "h": 4 }
   }
 }

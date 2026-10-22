@@ -139,13 +139,23 @@ service:
 1. Go to **Explore**
 2. Select the **Tempo** data source
 3. Search by service name: `openclaw-gateway`
-4. Or search by span name: `openclaw.agent.turn` or `tool.*`
+4. Or search by span name: `openclaw.agent.turn`, `chat <model>`, or `execute_tool <tool name>` (e.g. `execute_tool Read`)
 
 ### Example Dashboard Panels
 
+Label names follow the OTel attribute names with dots rewritten to underscores, the same as metric names: the model label is `gen_ai_response_model`, the tool label is `gen_ai_tool_name`, the provider label is `gen_ai_provider_name`.
+
+!!! warning "`rate()`/`increase()` on per-conversation metrics"
+    `openclaw.llm.tokens.*`, `openclaw.llm.cost.usd`, `openclaw.llm.requests`/`.duration`, and `openclaw.tool.calls`/`.duration` carry a per-conversation `gen_ai_conversation_id` label, so a windowed `rate()`/`increase()` can silently show `0` for one-shot sessions. For the LLM metrics, enable `enableByModelMetrics` and query the `_by_model` siblings instead — see [Limitations](../limitations.md#rateincrease-queries-can-show-zero-even-though-the-data-arrived-correctly) and [Metrics Reference](../telemetry/metrics.md#_by_model-metrics-opt-in).
+
 **Token Usage Over Time** (Prometheus/Mimir):
 ```promql
-sum(rate(openclaw_llm_tokens_total[5m])) by (model)
+sum(rate(openclaw_llm_tokens_total[5m])) by (gen_ai_response_model)
+```
+
+With `enableByModelMetrics: true`, the rate-safe equivalent:
+```promql
+sum(rate(openclaw_llm_tokens_total_by_model[5m])) by (gen_ai_response_model)
 ```
 
 **LLM Latency P95** (Prometheus/Mimir):
@@ -155,7 +165,7 @@ histogram_quantile(0.95, rate(openclaw_llm_duration_bucket[5m]))
 
 **Tool Call Rate** (Prometheus/Mimir):
 ```promql
-sum(rate(openclaw_tool_calls_total[5m])) by (tool_name)
+sum(rate(openclaw_tool_calls_total[5m])) by (gen_ai_tool_name)
 ```
 
 **Error Rate** (Prometheus/Mimir):
@@ -164,4 +174,4 @@ sum(rate(openclaw_llm_errors_total[5m])) / sum(rate(openclaw_llm_requests_total[
 ```
 
 !!! note "Metric name format"
-    OTel metrics use dots (`openclaw.llm.tokens.total`) but Prometheus converts them to underscores (`openclaw_llm_tokens_total`).
+    OTel metrics use dots (`openclaw.llm.tokens.total`) but Prometheus-compatible backends convert them to underscores (`openclaw_llm_tokens_total`). Depending on the backend's OTLP translation settings, counters may also get a `_total` suffix and some metrics a unit suffix (e.g. `openclaw_tool_calls_total`) — check your backend's metric browser for the exact names before building panels.

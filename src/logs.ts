@@ -84,6 +84,8 @@ export function shouldExclude(
   evt: LogEvent,
   config: LogPipelineConfig
 ): boolean {
+  if (!config.enabled) return true;
+
   if (config.excludeLevels.length > 0) {
     const lvl = (evt.level || "").toLowerCase();
     if (config.excludeLevels.includes(lvl)) return true;
