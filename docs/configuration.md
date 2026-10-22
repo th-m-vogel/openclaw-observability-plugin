@@ -13,10 +13,10 @@ Configure the custom hook-based OTel observability plugin via `~/.openclaw/openc
         "enabled": true,
         "hooks": { "allowConversationAccess": true },
         "config": {
-          "endpoint": "http://localhost:4318",
+          "endpoint": "https://otlp-collector.example.com",
           "protocol": "http",
           "headers": {
-            "Authorization": "Api-Token dt0c01.xxx"
+            "Authorization": "Bearer ${OTEL_API_KEY}"
           },
           "serviceName": "openclaw-gateway",
           "traces": true,
@@ -102,7 +102,7 @@ agent:main:telegram:direct:12345                                (no ephemeral su
 
 ### HTTP Protocol (Default)
 
-For OTLP/HTTP endpoints (port 4318):
+For OTLP/HTTP endpoints (port 4318 by convention — shown here against an externally-hosted collector; a local one would be `http://localhost:4318` instead):
 
 ```json
 {
@@ -111,7 +111,7 @@ For OTLP/HTTP endpoints (port 4318):
       "otel-observability": {
         "enabled": true,
         "config": {
-          "endpoint": "http://localhost:4318",
+          "endpoint": "http://otlp-collector.example.com:4318",
           "protocol": "http"
         }
       }
@@ -124,7 +124,7 @@ The endpoint auto-appends `/v1/traces`, `/v1/metrics`, `/v1/logs` as needed.
 
 ### gRPC Protocol
 
-For OTLP/gRPC endpoints (port 4317):
+For OTLP/gRPC endpoints (port 4317 by convention):
 
 ```json
 {
@@ -133,7 +133,7 @@ For OTLP/gRPC endpoints (port 4317):
       "otel-observability": {
         "enabled": true,
         "config": {
-          "endpoint": "http://localhost:4317",
+          "endpoint": "http://otlp-collector.example.com:4317",
           "protocol": "grpc"
         }
       }
@@ -188,7 +188,7 @@ If only some signals need their own endpoint, list only those — the rest keep 
       "otel-observability": {
         "enabled": true,
         "config": {
-          "endpoint": "http://localhost:4318",
+          "endpoint": "https://otlp-collector.example.com",
           "signalEndpoints": {
             "logs": "https://logs-only-backend.example.com/otlp"
           }
@@ -282,7 +282,7 @@ Control trace sampling rate to reduce volume:
         "enabled": true,
         "hooks": { "allowConversationAccess": true },
         "config": {
-          "endpoint": "http://localhost:4318",
+          "endpoint": "https://otlp-collector.example.com",
           "sampleRate": 0.1
         }
       }
@@ -314,7 +314,7 @@ Enable only specific signals:
         "enabled": true,
         "hooks": { "allowConversationAccess": true },
         "config": {
-          "endpoint": "http://localhost:4318",
+          "endpoint": "https://otlp-collector.example.com",
           "traces": true,
           "metrics": false,
           "logs": false
@@ -336,7 +336,7 @@ Enable only specific signals:
         "enabled": true,
         "hooks": { "allowConversationAccess": true },
         "config": {
-          "endpoint": "http://localhost:4318",
+          "endpoint": "https://otlp-collector.example.com",
           "traces": false,
           "metrics": true,
           "logs": false
@@ -358,7 +358,7 @@ Enable only specific signals:
         "enabled": true,
         "hooks": { "allowConversationAccess": true },
         "config": {
-          "endpoint": "http://localhost:4318",
+          "endpoint": "https://otlp-collector.example.com",
           "traces": false,
           "metrics": false,
           "logs": true
@@ -669,8 +669,8 @@ cat ~/.openclaw/openclaw.json | jq .
 
 ### Endpoint Unreachable?
 
-Test connectivity:
+Test connectivity against your configured `endpoint` (append `/v1/traces` for HTTP — gRPC and `signalEndpoints` overrides are used verbatim, no suffix):
 
 ```bash
-curl -v http://localhost:4318/v1/traces
+curl -v <your-endpoint>/v1/traces   # e.g. https://otlp-collector.example.com/v1/traces, or http://localhost:4318/v1/traces for a local collector
 ```

@@ -21,7 +21,7 @@ Add to your `~/.openclaw/openclaw.json`:
     "enabled": true,
     "otel": {
       "enabled": true,
-      "endpoint": "http://localhost:4318",
+      "endpoint": "https://otlp-collector.example.com",
       "serviceName": "openclaw-gateway",
       "traces": true,
       "metrics": true,
@@ -83,7 +83,7 @@ Add to your `~/.openclaw/openclaw.json`:
       "otel-observability": {
         "enabled": true,
         "config": {
-          "endpoint": "http://localhost:4318",
+          "endpoint": "https://otlp-collector.example.com",
           "protocol": "http",
           "serviceName": "openclaw-gateway"
         },
@@ -137,8 +137,8 @@ Then, **during `start()`** (after the gateway is ready):
 [otel] Starting OpenTelemetry observability (gateway-only init)...
 [otel] ✅ Observability pipeline active (gateway-side)
 [otel]   Traces=true Metrics=true Logs=true
-[otel]   Endpoint=http://localhost:4318 (http, shared default)
-[otel]   Effective endpoints: traces=http://localhost:4318 metrics=http://localhost:4318 logs=http://localhost:4318
+[otel]   Endpoint=https://otlp-collector.example.com (http, shared default)
+[otel]   Effective endpoints: traces=https://otlp-collector.example.com metrics=https://otlp-collector.example.com logs=https://otlp-collector.example.com
 ```
 
 The `Effective endpoints` line shows each signal's resolved base endpoint, including any `signalEndpoints` override (see [Configuration](./configuration.md#per-signal-endpoints-multi-backend-fan-out)). For the shared `endpoint` over HTTP, the exporters append `/v1/traces`, `/v1/metrics`, `/v1/logs` to it; overrides are used verbatim.
@@ -286,9 +286,9 @@ If you're using Option 1 (the official plugin) instead, the same `endpoint`/`hea
    journalctl --user -u openclaw-gateway -f
    ```
 
-2. Verify endpoint is reachable:
+2. Verify endpoint is reachable (your configured `endpoint`, with `/v1/traces` appended for HTTP):
    ```bash
-   curl -v http://localhost:4318/v1/traces
+   curl -v <your-endpoint>/v1/traces   # e.g. https://otlp-collector.example.com/v1/traces, or http://localhost:4318/v1/traces for a local collector
    ```
 
 3. Check the plugin config (Option 2):
@@ -345,7 +345,7 @@ The custom plugin requires messages to flow through the normal pipeline. Heartbe
 
 3. Verify the OTLP endpoint is reachable:
    ```bash
-   curl -v http://localhost:4318/v1/traces
+   curl -v <your-endpoint>/v1/traces   # e.g. https://otlp-collector.example.com/v1/traces, or http://localhost:4318/v1/traces for a local collector
    ```
 
 See [Architecture → Plugin Lifecycle](architecture.md#plugin-lifecycle) for why the `register()` vs `start()` split matters.
