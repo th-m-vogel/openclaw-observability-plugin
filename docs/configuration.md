@@ -62,6 +62,38 @@ Plugin entry configuration.
 
 `collapseEphemeralSessions` recognizes two session-key shapes commonly produced by recurring background work: a trailing per-run identifier after `:run:` (e.g. a cron job's per-run session key), and a trailing per-run identifier after an underscore (e.g. an internal-session-effect turn's key). When enabled, metrics for a matching session key are labeled with the stable part only, instead of a fresh identifier every run — so a "tokens by session" dashboard panel shows one row per job instead of one row per run. Traces and logs are unaffected and always carry the full, per-run session key for drill-down. Default `false`: existing dashboards keep working unmodified unless you opt in.
 
+**Exact rules implemented** (`src/metric-session-key.ts`), checked in this order, first match wins — everything else in the key before the matched suffix is left untouched:
+
+1. **A trailing `:run:<uuid>` is stripped**, where `<uuid>` is a standard 8-4-4-4-12 hex UUID (case-insensitive). This is the shape a recurring cron job's per-run session key carries.
+   ```
+   agent:main:cron:ff729cdc-1234-5678-9abc-def012345678:run:28c489cb-aaaa-bbbb-cccc-dddddddddddd
+   → agent:main:cron:ff729cdc-1234-5678-9abc-def012345678
+   ```
+2. **A trailing `_<uuid>` is stripped**, same UUID shape, when it isn't an `internal-session-effects:` session (rule 3 below is more permissive for those).
+   ```
+   agent:main:internal-session-effects:skill-workshop-review_a737fdf6-1111-2222-3333-444444444444
+   → agent:main:internal-session-effects:skill-workshop-review
+   ```
+3. **For `internal-session-effects:` session keys specifically, two looser variants also collapse**, because real per-run IDs observed live for this session type aren't always standard UUIDs (some have 6 dash-separated hex groups, not 5):
+   - A trailing `_<opaque-id>` where `<opaque-id>` is any run of hex digits and dashes (not only a strict UUID):
+     ```
+     agent:main:internal-session-effects:skill-workshop-review_f54ebfff-d4e5-4969-8c27-87-35c6acc9e5a6bf79
+     → agent:main:internal-session-effects:skill-workshop-review
+     ```
+   - When there's no label before the per-run id at all (nothing to anchor an `_` on), a bare hex-and-dash tail directly after the marker's own trailing `:` collapses to the marker itself:
+     ```
+     agent:main:internal-session-effects:55d1aba4-57f5-4983-8388-8c9cbf2dd7c9-da3b886ec4001009
+     → agent:main:internal-session-effects
+     ```
+
+**Deliberately left uncollapsed** — the match is positional (end of string only), never "any UUID anywhere," so a UUID that's a stable identifier rather than a per-run one is untouched:
+
+```
+agent:main:channel:ff729cdc-1234-5678-9abc-def012345678        (a bare trailing UUID, no :run:/_ separator — a channel/job ID)
+agent:main:cron:ff729cdc-1234-5678-9abc-def012345678:run:latest (:run: present, but "latest" isn't UUID-shaped)
+agent:main:telegram:direct:12345                                (no ephemeral suffix of any recognized shape)
+```
+
 `enableByModelMetrics` is the feature to reach for when you need a metric that's *reliably* rate-able, regardless of how often a session recurs — see [Limitations](./limitations.md) for the full comparison with `collapseEphemeralSessions` (which can incidentally help the common recurring-cron case too, but isn't guaranteed to) and for the one remaining gap in `enableByModelMetrics` itself. Default `false` — enabling it roughly doubles the number of LLM metric data points this plugin emits, which has a direct cost impact on a metrics backend billed by data volume or storage.
 
 ## Endpoint Configuration
