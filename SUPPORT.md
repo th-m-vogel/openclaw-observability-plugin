@@ -1,6 +1,6 @@
 # Support Policy
 
-There is a single actively maintained line: `main`. Releases are cut from it as semver tags (`v0.9.2`, `v0.10.0`, `v0.11.0`, and onward) — this fork's releases continue the upstream project's `0.x` numbering rather than restarting it. No legacy-version branch is tracked separately — upgrade by pulling the latest tag.
+There is a single actively maintained line: `main`. Releases are cut from it as semver tags (`v0.9.2`, `v0.10.0`, `v0.11.0`, `v0.12.0`, and onward) — this fork's releases continue the upstream project's `0.x` numbering rather than restarting it. No legacy-version branch is tracked separately — upgrade by pulling the latest tag.
 
 ## Minimum OpenClaw version
 
