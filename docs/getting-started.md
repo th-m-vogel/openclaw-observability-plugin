@@ -57,7 +57,7 @@ For connected traces and per-tool-call visibility, add the custom plugin.
 
 ```bash
 mkdir -p ~/.openclaw/plugins && cd ~/.openclaw/plugins
-git clone --branch v0.11.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git otel-observability
+git clone --branch v0.12.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git otel-observability
 ```
 
 ### Step 2: Install Dependencies and Build

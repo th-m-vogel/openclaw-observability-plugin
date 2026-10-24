@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.12.0](https://github.com/th-m-vogel/openclaw-observability-plugin/compare/v0.11.0...v0.12.0) (2026-10-24)
+
 ### Removed
 
 * **metrics:** removed metrics and span attributes that read fields OpenClaw core never emits (ISI-1018 cleanup, [#20](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/20)): the `openclaw.llm.tokens.system`/`.user`/`.tool_result`/`.skill` token-type breakdown counters and their `_by_model` siblings, the `before_prompt_build`-sourced `openclaw.context.skill_count`/`.skill_names`/`.limit`/`.used`/`.utilization` span attributes, and the `openclaw.context.build_duration` histogram. Cross-checked against OpenClaw core's event type definitions, its official `diagnostics-otel` exporter, and its OpenTelemetry/Prometheus metrics docs: none of these fields exist on `model.usage` or `before_prompt_build`, so the instruments silently recorded nothing since they were first added upstream. No dashboard loses real data, but panels referencing these names should be deleted. `openclaw.llm.cost.usd` is unaffected — it reads a real field (`costUsd`).
@@ -38,6 +40,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Documentation
 
 * full documentation accuracy pass ahead of 0.12.0: config examples that showed the official `diagnostics-otel` plugin's `diagnostics.otel` block in places documenting this plugin now show `plugins.entries.otel-observability.config`; tool-span names corrected to the real `execute_tool <name>` form; the metrics reference now lists every metric the plugin actually emits; `logConfig` documented; quoted log lines and hook-registration lists checked against the source; Dynatrace dashboards fixed to use real metric/attribute names (`openclaw.llm.cost.usd`, `gen_ai.response.model`) and stripped of unrelated `paperclip.*` tiles.
+* **limitations:** `cost: undefined` is no longer documented as a custom/self-hosted-endpoint-only problem ([#28](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/28)). OpenClaw core has no bundled price table — it resolves cost from external third-party model-pricing catalogs at runtime, so any model (mainstream hosted providers included) shows `cost: undefined` if its exact ID isn't currently listed in one of them. Also documents `tieredPricing`, a real core-supported field for context-length-tiered pricing, for the first time.
+* **configuration:** `collapseEphemeralSessions`'s exact matching rules are now spelled out with concrete before/after examples ([#29](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/29)), pulled from the test suite rather than left as prose-only. Clarified that `main` in session-key examples throughout the docs is a placeholder agent id (`agents.entries.<agentId>` in `openclaw.json`), not a special or implicit value.
+* every example OTLP endpoint across the docs changed from `http://localhost:4318` to an external placeholder host ([#30](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/30)) — a `localhost` example implies a bundled service, which this plugin never ships. Factual default-value references and genuinely local-collector walkthroughs are unaffected.
+* new `docs/glossary.md` ([#31](https://github.com/th-m-vogel/openclaw-observability-plugin/pull/31)) defining the OTel/GenAI-semconv, compliance, and JS-ecosystem acronyms used throughout these docs, plus this project's own `ISI-####`/`registrationMode` conventions.
 
 ## [0.11.0](https://github.com/th-m-vogel/openclaw-observability-plugin/compare/v0.10.0...v0.11.0) (2026-10-11)
 

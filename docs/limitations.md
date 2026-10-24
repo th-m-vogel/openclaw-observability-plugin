@@ -160,7 +160,7 @@ This one is easy to mistake for a missing-metric bug (like the section above), b
 
 **Workaround:** for trend/dashboard panels that don't need per-conversation granularity, query with an instant/last-value approach (e.g. `sum by (gen_ai_response_model) (openclaw_llm_cost_usd)` without `increase()`/`rate()`, read as a running total rather than a delta) or pre-aggregate outside Prometheus. There's no query-side fix that preserves both per-conversation lookup and a reliable windowed delta from the same metric — the label that makes lookup possible is exactly the label that makes the series one-shot.
 
-**Fixed for LLM metrics as of `0.12.0-dev`, opt-in — with one remaining gap.** Every per-conversation LLM metric now has a `_by_model` sibling (`enableByModelMetrics: true`, see [Configuration](./configuration.md)) — same value, same attributes, but with `gen_ai.conversation.id`/`gen_ai.agent.id` dropped, so the series accumulates across every call to that provider+model instead of starting fresh per conversation:
+**Fixed for LLM metrics as of `0.12.0`, opt-in — with one remaining gap.** Every per-conversation LLM metric now has a `_by_model` sibling (`enableByModelMetrics: true`, see [Configuration](./configuration.md)) — same value, same attributes, but with `gen_ai.conversation.id`/`gen_ai.agent.id` dropped, so the series accumulates across every call to that provider+model instead of starting fresh per conversation:
 
 ```
 sum by (gen_ai_response_model) (increase(openclaw_llm_cost_usd_by_model[$__rate_interval]))

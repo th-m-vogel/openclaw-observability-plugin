@@ -18,7 +18,8 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full release history.
 
 | Fork release | Minimum OpenClaw | Last verified against | Status |
 |---|---|---|---|
-| `0.11.0` | `2026.9.8` | `2026.10.1` | **Active (this fork)** — per-call token metrics, `#166289` duplicate-dispatch fix |
+| `0.12.0` | `2026.9.9` | `2026.10.7` | **Active (this fork)** — ISI-9700 guard removal, `collapseEphemeralSessions`/`enableByModelMetrics`, `tool.loop`/`model.failover`/`skill.used` metrics |
+| `0.11.0` | `2026.9.8` | `2026.10.1` | Superseded by `0.12.0` |
 | `0.10.0` | `2026.4.21` | `2026.9.8` | Superseded by `0.11.0` |
 | `0.9.2` | `2026.4.21` | `2026.9.7` | Superseded by `0.10.0` |
 
@@ -28,7 +29,7 @@ All releases live on `main`; there is no legacy-version branch split to track. U
 
 Only this fork's own work is listed here — see [`CHANGELOG.md`](CHANGELOG.md) for full detail on every entry, including upstream's pre-fork history.
 
-**`0.12.0-dev`:**
+**`0.12.0`:**
 - New opt-in `collapseEphemeralSessions` config flag: collapses ephemeral per-run session-key shapes (recurring cron jobs, internal-session-effect turns) to a stable, job-level identifier on metric labels only, without touching trace spans or log lines, which always keep the full per-run session key. A dashboard-legibility feature first — fewer, more readable rows for a recurring job's "tokens by session" panel — though as a side effect it can also make a recurring job's `rate()`/`increase()` queries work once its collapsed series has accumulated more than one sample. Default `false`, fully backward-compatible with existing dashboards. See [`docs/telemetry/metrics.md`](docs/telemetry/metrics.md) and [`docs/configuration.md`](docs/configuration.md).
 - New opt-in `enableByModelMetrics` config flag (default `false`): adds a `_by_model` sibling for every per-conversation LLM metric, the feature built specifically to make `rate()`/`increase()` reliably work regardless of how often a session recurs — unlike `collapseEphemeralSessions`'s side effect above, this doesn't depend on a session recurring at all. Off by default because it roughly doubles LLM metric data-point volume, which has a direct cost impact on a billed-by-volume managed metrics backend — check its pricing before enabling. See [`docs/telemetry/metrics.md`](docs/telemetry/metrics.md#_by_model-metrics-opt-in).
 - New metrics sourced from real OpenClaw core diagnostic events: `openclaw.skill.used`, `openclaw.model.failover`, and `openclaw.tool.loop` (runaway tool-call loop detection). See [`docs/telemetry/metrics.md`](docs/telemetry/metrics.md).
@@ -74,7 +75,7 @@ This plugin is separate from OpenClaw core's own built-in `diagnostics-otel` plu
 
 1. Clone, pinned to a release tag, into your OpenClaw install's `plugins/` directory, and build:
    ```bash
-   git clone --branch v0.11.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git ~/.openclaw/plugins/otel-observability
+   git clone --branch v0.12.0 https://github.com/th-m-vogel/openclaw-observability-plugin.git ~/.openclaw/plugins/otel-observability
    cd ~/.openclaw/plugins/otel-observability
    npm ci && npm run build
    ```
