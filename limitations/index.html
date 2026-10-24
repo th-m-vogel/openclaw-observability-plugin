@@ -1,0 +1,1598 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="OpenTelemetry observability for OpenClaw AI agents — traces, metrics, and logs">
+      
+      
+      
+        <link rel="canonical" href="https://th-m-vogel.github.io/openclaw-observability-plugin/limitations/">
+      
+      
+        <link rel="prev" href="../architecture/">
+      
+      
+        <link rel="next" href="../development/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Limitations - OpenClaw Observability Plugin</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="amber">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#limitations" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="OpenClaw Observability Plugin" class="md-header__button md-logo" aria-label="OpenClaw Observability Plugin" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            OpenClaw Observability Plugin
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Limitations
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="amber"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="amber"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/th-m-vogel/openclaw-observability-plugin" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    th-m-vogel/openclaw-observability-plugin
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="OpenClaw Observability Plugin" class="md-nav__button md-logo" aria-label="OpenClaw Observability Plugin" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    OpenClaw Observability Plugin
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/th-m-vogel/openclaw-observability-plugin" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    th-m-vogel/openclaw-observability-plugin
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Telemetry Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telemetry/traces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telemetry/metrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telemetry/tokens/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Token Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backends
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Backends
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backends/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backends/dynatrace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynatrace
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backends/otel-collector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OTel Collector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backends/grafana/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grafana
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backends/generic-otlp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Generic OTLP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Security
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy (captureContent)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/tetragon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kernel Monitoring with Tetragon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Limitations
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#official-diagnostics-otel-plugin-dependency-issue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Official diagnostics-otel Plugin Dependency Issue
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-instrumentation-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Instrumentation Limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#no-zero-code-auto-instrumentation-and-no-per-call-tokencost-data-even-via-hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No Zero-Code Auto-Instrumentation (and no per-call token/cost data, even via hooks)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="No Zero-Code Auto-Instrumentation (and no per-call token/cost data, even via hooks)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-you-get-vs-whats-missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What You Get vs. What's Missing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-no-zero-code-auto-instrumentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why no zero-code auto-instrumentation?
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Why no zero-code auto-instrumentation?">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#approach-1-plugin-side-sdk-patching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approach 1: Plugin-Side SDK Patching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#approach-2-node_options-preload-with-iitm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approach 2: NODE_OPTIONS Preload with IITM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#approach-3-manual-register-with-iitm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approach 3: Manual register() with IITM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#path-forward" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path Forward
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loki-backends-may-not-show-a-real-service_name-label" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loki backends may not show a real service_name label
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gen_ai_provider_name-may-be-missing-or-inconsistent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gen_ai_provider_name may be missing or inconsistent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-reporting-can-silently-go-missing-for-some-session-types-openclaw-core-not-this-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost reporting can silently go missing for some session types (OpenClaw core, not this plugin)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rateincrease-queries-can-show-zero-even-though-the-data-arrived-correctly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rate()/increase() queries can show zero even though the data arrived correctly
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#official-diagnostics-otel-plugin-dependency-issue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Official diagnostics-otel Plugin Dependency Issue
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-instrumentation-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Instrumentation Limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#no-zero-code-auto-instrumentation-and-no-per-call-tokencost-data-even-via-hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No Zero-Code Auto-Instrumentation (and no per-call token/cost data, even via hooks)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="No Zero-Code Auto-Instrumentation (and no per-call token/cost data, even via hooks)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-you-get-vs-whats-missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What You Get vs. What's Missing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-no-zero-code-auto-instrumentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why no zero-code auto-instrumentation?
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Why no zero-code auto-instrumentation?">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#approach-1-plugin-side-sdk-patching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approach 1: Plugin-Side SDK Patching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#approach-2-node_options-preload-with-iitm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approach 2: NODE_OPTIONS Preload with IITM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#approach-3-manual-register-with-iitm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approach 3: Manual register() with IITM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#path-forward" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path Forward
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loki-backends-may-not-show-a-real-service_name-label" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loki backends may not show a real service_name label
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gen_ai_provider_name-may-be-missing-or-inconsistent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gen_ai_provider_name may be missing or inconsistent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-reporting-can-silently-go-missing-for-some-session-types-openclaw-core-not-this-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost reporting can silently go missing for some session types (OpenClaw core, not this plugin)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rateincrease-queries-can-show-zero-even-though-the-data-arrived-correctly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rate()/increase() queries can show zero even though the data arrived correctly
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h1>
+<h2 id="official-diagnostics-otel-plugin-dependency-issue">Official diagnostics-otel Plugin Dependency Issue<a class="headerlink" href="#official-diagnostics-otel-plugin-dependency-issue" title="Permanent link">&para;</a></h2>
+<p>When OpenClaw is installed via <strong>npm</strong> (not pnpm from source), the bundled <code>@openclaw/diagnostics-otel</code> plugin may fail to load with:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Error: Cannot find module '@opentelemetry/api'
+</span></code></pre></div>
+<p><strong>Why:</strong> The official plugin uses <code>workspace:*</code> dependency protocol (pnpm monorepo feature) that doesn't resolve when installed via npm.</p>
+<p><strong>Workaround:</strong> Use this custom plugin instead, which has its own properly installed OTel dependencies.</p>
+<p><strong>Note:</strong> Don't run both plugins simultaneously — they both initialize the OTel SDK which can cause conflicts.</p>
+<hr />
+<h2 id="auto-instrumentation-limitations">Auto-Instrumentation Limitations<a class="headerlink" href="#auto-instrumentation-limitations" title="Permanent link">&para;</a></h2>
+<h2 id="no-zero-code-auto-instrumentation-and-no-per-call-tokencost-data-even-via-hooks">No Zero-Code Auto-Instrumentation (and no per-call token/cost data, even via hooks)<a class="headerlink" href="#no-zero-code-auto-instrumentation-and-no-per-call-tokencost-data-even-via-hooks" title="Permanent link">&para;</a></h2>
+<p>The plugin cannot auto-instrument the Anthropic/OpenAI SDKs themselves (e.g. monkey-patching <code>anthropic.chat</code> or <code>openai.chat.completions.create</code> the way a traditional OTel auto-instrumentation package would). That's a real, structural limitation of OpenClaw's ESM module architecture — see "Why?" below.</p>
+<p>That's different from per-call visibility, though, which <strong>is</strong> available, in two separate ways. OpenClaw core exposes <code>model_call_started</code>/<code>model_call_ended</code> typed hook events, fired once per real model API call (not once per agent turn), and this plugin has used them since ISI-926 to produce a per-call <code>chat {model}</code> span alongside the aggregated <code>openclaw.agent.turn</code> span, plus (0.11.0+) <code>openclaw.llm.requests</code>/<code>.duration</code>. Separately, OpenClaw also emits <code>model.call.completed</code>/<code>model.call.error</code> <em>internal diagnostic events</em> (a different mechanism, via <code>onInternalDiagnosticEvent</code>, not the hook pair above) — confirmed, as of OpenClaw v2026.9.8, to carry genuine call-scoped usage (<code>observer.usageField()</code>, read from that call's own terminal provider response). This plugin uses that (0.11.0+) for <code>openclaw.llm.tokens.*</code> — real per-call token counts, not turn aggregates.</p>
+<p><strong>Cost is still turn-level only.</strong> No OpenClaw plugin API — the hook pair, the diagnostic events above, or anything else — exposes a per-call cost figure; <code>model.usage</code> (the turn-aggregated event) remains the only source for <code>openclaw.llm.cost.usd</code>. A feature request asking core to expose real per-call token usage was filed as <a href="https://github.com/openclaw/openclaw/issues/166623">openclaw/openclaw#166623</a> and closed upstream as already-implemented via the diagnostic-events mechanism above — correctly, once we checked; per-call cost remains unaddressed by that issue or any other known mechanism.</p>
+<p><strong>Codex/ACP-harness sessions may have no token metrics at all (unconfirmed, flagged not fixed).</strong> Codex-harness model calls are already known to emit no <code>model.usage</code> at all — a structurally separate code path from the native embedded-agent-runner this plugin's per-call instrumentation targets. Before 0.11.0, those turns still got <em>some</em> token metrics, because the <code>agent_end</code> hook fallback this release removed parsed <code>usage</code> straight out of the turn's own <code>messages</code> array, independent of either diagnostic source. Whether <code>model.call.completed</code>/<code>model.call.error</code> fire for Codex-harness calls the way they do for the native path hasn't been verified — if they don't, <code>openclaw.llm.tokens.*</code> now silently reports nothing for those sessions, a regression from the old (if also schema-broken) fallback. Needs a live check on a Codex-harness-routed session; until then, don't assume parity with the native path for this one case.</p>
+<h3 id="what-you-get-vs-whats-missing">What You Get vs. What's Missing<a class="headerlink" href="#what-you-get-vs-whats-missing" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Status</th>
+<th>Details</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Token usage per real call</td>
+<td>✅ (0.11.0+)</td>
+<td><code>openclaw.llm.tokens.*</code> from <code>model.call.completed</code>/<code>model.call.error</code> diagnostic events — requires OpenClaw v2026.9.8+</td>
+</tr>
+<tr>
+<td>Token usage per agent turn</td>
+<td>✅</td>
+<td>Still available too: <code>gen_ai.usage.input_tokens</code>/<code>.output_tokens</code> on <code>openclaw.agent.turn</code>, from <code>model.usage</code></td>
+</tr>
+<tr>
+<td>Model name</td>
+<td>✅</td>
+<td><code>gen_ai.response.model</code> on both the turn span and each per-call span</td>
+</tr>
+<tr>
+<td>Cache token tracking</td>
+<td>✅ (0.11.0+)</td>
+<td><code>cacheRead</code>/<code>cacheWrite</code> now per real call, same source as token usage above</td>
+</tr>
+<tr>
+<td>Per-call spans</td>
+<td>✅</td>
+<td><code>chat {model}</code> CLIENT span per real call, via <code>model_call_started</code>/<code>model_call_ended</code></td>
+</tr>
+<tr>
+<td>Per-call request count &amp; latency</td>
+<td>✅</td>
+<td><code>openclaw.llm.requests</code>/<code>.duration</code> (0.11.0+)</td>
+</tr>
+<tr>
+<td>Cost per real call</td>
+<td>❌</td>
+<td>Only available per agent turn, from <code>model.usage</code> — core has no per-call price lookup anywhere</td>
+</tr>
+<tr>
+<td>Request/response content</td>
+<td>✅ (opt-in)</td>
+<td>Off by default. The <code>captureContent</code> option records prompt, completion, system-prompt, and tool I/O text on this plugin's spans (redacted, then truncated), and the optional ESM preload adds Traceloop LLM-client spans — see <a href="../security/privacy/">Privacy</a></td>
+</tr>
+<tr>
+<td>Standard GenAI dashboards</td>
+<td>⚠️</td>
+<td>Spans and metrics carry stable OTel GenAI semconv attributes (<code>gen_ai.provider.name</code>, <code>gen_ai.response.model</code>, <code>gen_ai.usage.*</code>, ...), model-call and tool spans use the semconv <code>chat &lt;model&gt;</code>/<code>execute_tool &lt;name&gt;</code> names, and the stable <code>gen_ai.client.token.usage</code>/<code>.operation.duration</code> histograms are emitted. The request/session/turn spans are <code>openclaw.*</code>-named, though, so a prebuilt GenAI dashboard that keys on span names may need adjusting</td>
+</tr>
+<tr>
+<td>Zero-code SDK auto-instrumentation</td>
+<td>❌</td>
+<td>Would require patching <code>@anthropic-ai/sdk</code>/OpenAI SDK directly — see below for why that's not viable here</td>
+</tr>
+</tbody>
+</table>
+<h3 id="why-no-zero-code-auto-instrumentation">Why no zero-code auto-instrumentation?<a class="headerlink" href="#why-no-zero-code-auto-instrumentation" title="Permanent link">&para;</a></h3>
+<p>We attempted three approaches. All failed due to OpenClaw's ESM module architecture.</p>
+<h4 id="approach-1-plugin-side-sdk-patching">Approach 1: Plugin-Side SDK Patching<a class="headerlink" href="#approach-1-plugin-side-sdk-patching" title="Permanent link">&para;</a></h4>
+<p>OpenClaw's plugin loader uses <strong>jiti</strong> (a CJS-compatible TypeScript loader). The <code>@anthropic-ai/sdk</code> package has <strong>dual entry points</strong>:</p>
+<ul>
+<li><strong>ESM:</strong> <code>@anthropic-ai/sdk/index.mjs</code> — loaded by <code>@mariozechner/pi-ai</code> (OpenClaw's LLM provider) via <code>import</code></li>
+<li><strong>CJS:</strong> <code>@anthropic-ai/sdk/index.js</code> — loaded by the plugin via <code>createRequire()</code></li>
+</ul>
+<p>These are completely separate module instances with different prototypes. Patching the CJS version has zero effect on the ESM instance that actually handles LLM calls.</p>
+<p>Additionally, jiti blocks native <code>import()</code> calls (<code>ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING</code>), making it impossible to access the ESM instance from plugin code.</p>
+<h4 id="approach-2-node_options-preload-with-iitm">Approach 2: NODE_OPTIONS Preload with IITM<a class="headerlink" href="#approach-2-node_options-preload-with-iitm" title="Permanent link">&para;</a></h4>
+<p>The standard OpenTelemetry approach for ESM instrumentation:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">NODE_OPTIONS</span><span class="o">=</span><span class="s2">"--import ./instrumentation/preload.mjs"</span>
+</span></code></pre></div>
+<p>This uses <a href="https://github.com/DataDog/import-in-the-middle">import-in-the-middle</a> (IITM) to register ESM loader hooks that intercept module imports. However, IITM intercepts <strong>all</strong> ESM modules globally — not just the targeted ones.</p>
+<p>When IITM wraps <code>@mariozechner/pi-ai</code>, it breaks the module's named exports:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>SyntaxError: The requested module '@mariozechner/pi-ai' does not
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>provide an export named 'getEnvApiKey'
+</span></code></pre></div>
+<p>This crash-loops the gateway on startup.</p>
+<h4 id="approach-3-manual-register-with-iitm">Approach 3: Manual register() with IITM<a class="headerlink" href="#approach-3-manual-register-with-iitm" title="Permanent link">&para;</a></h4>
+<p>Using <code>register()</code> from <code>node:module</code> to manually install IITM loader hooks produces the same crash — the hooks are global and cannot selectively skip modules.</p>
+<h3 id="environment">Environment<a class="headerlink" href="#environment" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Node.js v22.22.0</li>
+<li><code>@opentelemetry/instrumentation</code> 0.203.0</li>
+<li><code>import-in-the-middle</code> 1.15.0</li>
+<li><code>@anthropic-ai/sdk</code> 0.71.2</li>
+</ul>
+<h3 id="path-forward">Path Forward<a class="headerlink" href="#path-forward" title="Permanent link">&para;</a></h3>
+<p>Items 1 and 2 below have since shipped — 1 as OpenClaw core's <code>model_call_started</code>/<code>model_call_ended</code> typed hooks (ISI-926), 2 via a different mechanism than originally investigated (<code>model.call.completed</code>/<code>model.call.error</code> diagnostic events, not the hook pair). What's left unsolved:</p>
+<ol>
+<li>~~<strong>LLM call events on the plugin API</strong>~~ — done, see above.</li>
+<li>~~<strong>Per-call token data</strong>~~ — done (0.11.0+), via <code>model.call.completed</code>/<code>model.call.error</code>, not the hook pair originally investigated. <a href="https://github.com/openclaw/openclaw/issues/166623">openclaw/openclaw#166623</a> closed upstream on this basis.</li>
+<li><strong>Per-call cost data</strong> — no mechanism found anywhere in the plugin API, including the one that solved per-call tokens. Still the single remaining gap.</li>
+<li><strong>Built-in OTel hook in pi-ai</strong> — a callback around the actual SDK call in the provider layer</li>
+<li><strong>Fix IITM compatibility</strong> — investigate why IITM breaks <code>@mariozechner/pi-ai</code> exports</li>
+<li><strong>Native OTel support</strong> — bundle instrumentation directly in OpenClaw where it can control the loader lifecycle</li>
+</ol>
+<p>Until 3-6 are addressed, this plugin's hook-and-diagnostic-event-based approach is the viable path for this ecosystem — zero-code SDK patching isn't — but cost reporting stays capped at agent-turn granularity regardless of how this plugin is built; that's an OpenClaw platform limitation, not a plugin engineering problem.</p>
+<hr />
+<h2 id="loki-backends-may-not-show-a-real-service_name-label">Loki backends may not show a real <code>service_name</code> label<a class="headerlink" href="#loki-backends-may-not-show-a-real-service_name-label" title="Permanent link">&para;</a></h2>
+<p>Some Loki-backed OTLP ingestion pipelines (confirmed with IONOS Cloud Observability's Logging Service) do not map the OTel <code>service.name</code> resource attribute into a Loki stream label — every log stream shows <code>service_name="unknown_service"</code> in Grafana regardless of what <code>serviceName</code> this plugin's config sets. This is not a plugin bug: the plugin sets <code>service.name</code> identically on the metrics, trace, and log <code>Resource</code> (see <code>src/telemetry.ts</code> and <code>src/logs.ts</code>), and metrics/traces on the same backend correctly carry service identity. The gap is specific to how that Loki pipeline maps OTLP resource attributes to stream labels. Workaround: use the pipeline's own fixed <code>tag</code> (or another label the pipeline does propagate) for service identification in Loki queries/dashboards, and put <code>service.name</code> in the log body/structured attributes if you need it visible per-record.</p>
+<hr />
+<h2 id="gen_ai_provider_name-may-be-missing-or-inconsistent"><code>gen_ai_provider_name</code> may be missing or inconsistent<a class="headerlink" href="#gen_ai_provider_name-may-be-missing-or-inconsistent" title="Permanent link">&para;</a></h2>
+<p>Some token-usage metrics and spans are missing the <code>gen_ai_provider_name</code> label, or carry it inconsistently across calls to the exact same model/session. Confirmed present for both Anthropic-native and IONOS-routed (Qwen) calls, which rules out a per-backend cause. The plugin reads <code>event.provider</code>/<code>ctx.provider</code> from OpenClaw core's own <code>model.usage</code> event at every call site (see <code>src/hooks.ts</code>) and has no independent, reliable signal to backfill from when core omits it. Likely root cause is upstream in OpenClaw core, tracked as <a href="https://github.com/openclaw/openclaw/issues/153244">openclaw/openclaw#153244</a>. Workaround: group Grafana panels/queries by <code>gen_ai_response_model</code> instead of <code>gen_ai_provider_name</code> until core's event is fixed.</p>
+<hr />
+<h2 id="cost-reporting-can-silently-go-missing-for-some-session-types-openclaw-core-not-this-plugin">Cost reporting can silently go missing for some session types (OpenClaw core, not this plugin)<a class="headerlink" href="#cost-reporting-can-silently-go-missing-for-some-session-types-openclaw-core-not-this-plugin" title="Permanent link">&para;</a></h2>
+<p><code>openclaw.llm.cost.usd</code> comes entirely from OpenClaw core's own <code>model.usage</code> diagnostic event — this plugin has no independent accounting and only relays what core emits. That event does not fire at all for several confirmed session shapes, each tracked upstream as its own issue since the trigger conditions are distinct:</p>
+<ul>
+<li><strong>Sessions running under a per-channel/topic model override</strong> — <a href="https://github.com/openclaw/openclaw/issues/164562">openclaw/openclaw#164562</a>.</li>
+<li><strong>Internal/background agent-turn sessions</strong> spawned by core itself (scheduled maintenance tasks, memory-effect turns), independent of any model override — <a href="https://github.com/openclaw/openclaw/issues/169156">openclaw/openclaw#169156</a>.</li>
+<li><strong>Continuation steps within a multi-call tool-use turn</strong>, correlated with the <code>messages.groupChat.visibleReplies</code> channel setting — <a href="https://github.com/openclaw/openclaw/issues/167920">openclaw/openclaw#167920</a>.</li>
+</ul>
+<p>In every case, real per-call token counts still arrive correctly via the separate <code>model.call.completed</code>/<code>model.call.error</code> diagnostic events (see <a href="../telemetry/tokens/">Telemetry → Tokens</a>) — only cost goes missing, because cost is the only metric still tied to <code>model.usage</code>. If a dashboard shows tokens with no matching cost for a session, this is almost always why.</p>
+<p>A related, separate defect — <code>model.usage</code> occasionally double-firing for the exact same real call, inflating cost/tokens — was root-caused to a plugin-side gap (a second, independent module instance loaded during a core-internal read-only pass could receive the same event dispatch) and fixed in this plugin as of the <code>registrationMode</code>-based <code>register()</code> gate (see <code>CHANGELOG.md</code>). That one <em>was</em> this plugin's responsibility and is closed; the gaps above are not — there's no plugin-side workaround for an event that core never emits.</p>
+<p><strong>A broader, related gap: OpenClaw's built-in <code>openclaw</code> system/custodian agent emits almost no telemetry at all, not just missing cost.</strong> Turns running under this agent (<code>agentId: "openclaw"</code>, sessions namespaced <code>agent:openclaw:openclaw-&lt;uuid&gt;</code>, the agent backing system setup/config/doctor-style operations — not a user-facing conversation) appear to produce no mid/end-of-turn instrumentation beyond the initial <code>before_model_resolve</code> hook and the resulting agent-turn span: no <code>model_call_started</code>, no tool-call spans, no <code>model.usage</code>, no <code>agent_end</code>. Unlike the gaps above, tokens don't arrive correctly either here — the entire post-<code>before_model_resolve</code> pipeline appears silent for this agent. Tracked as <a href="https://github.com/openclaw/openclaw/issues/169158">openclaw/openclaw#169158</a>. Core's own triage has independently confirmed the narrower claim (missing <code>model.usage</code> settlement for this agent) but flagged the broader "every downstream hook is silent" claim as needing a live reproduction before fully crediting it — treat the full extent of this one as not yet fully confirmed. Low practical impact either way: this affects observability into OpenClaw's own internal setup/maintenance operations, not visibility into real conversational usage or cost.</p>
+<p><strong><code>costUsd</code> can be missing even for mainstream, first-party-hosted providers</strong> — this is wider than it first looks, and worth separating into two genuinely different causes.</p>
+<p><strong>Structural case: custom/self-hosted OpenAI-compatible endpoints.</strong> These always report <code>costUsd: undefined</code>, tokens unaffected. No fix is possible, on the plugin side or otherwise: the OpenAI Chat Completions API spec has no cost field at all, ever, only a token-count <code>usage</code> object. There is nothing for OpenClaw core to resolve a price from.</p>
+<p><strong>Catalog-coverage case: any other provider, including well-known hosted ones.</strong> <code>costUsd</code> for a normal, non-custom model call depends entirely on OpenClaw core resolving a per-token price for that exact model ID — and core has <strong>no bundled, maintained price table of its own</strong>. It resolves pricing at runtime from a set of external, independently-maintained third-party aggregators (OpenCode/models.dev's catalog, OpenRouter, Venice, Chutes, Cerebras, DeepInfra, and LiteLLM's community-maintained pricing JSON on GitHub — see <code>model-catalog-pricing.ts</code> in OpenClaw core). If a model's exact ID isn't currently listed with pricing in any of those, cost silently comes back <code>undefined</code> — tokens are unaffected, since those come from a separate event entirely. Confirmed live: Google's Gemini models (<code>gemini-3.1-pro-preview</code> specifically, a brand-name hosted provider, not a custom endpoint) had no auto-resolved cost on a real gateway, because that model ID wasn't yet carried by any of the aggregators core queries. Preview/newly-released model IDs are the likeliest to hit this; well-established ones (e.g. most Anthropic/OpenAI model IDs) are usually covered.</p>
+<p><strong>Fix (this one has one): define the model's cost manually.</strong> Add the model under <code>models.providers.&lt;provider&gt;.models[]</code> in <code>openclaw.json</code> with an explicit <code>cost</code> object — <code>input</code>/<code>output</code>/<code>cacheRead</code>/<code>cacheWrite</code>, each a USD rate per million tokens — and OpenClaw core resolves pricing from that instead of the external catalogs. For a provider with context-length-tiered pricing (Gemini's real-world pricing roughly doubles past a 200K-token prompt), core also supports a <code>tieredPricing</code> array alongside the flat rates:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">"cost"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">"input"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="nt">"cacheRead"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.2</span><span class="p">,</span><span class="w"> </span><span class="nt">"cacheWrite"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">"tieredPricing"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"input"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="mi">18</span><span class="p">,</span><span class="w"> </span><span class="nt">"cacheRead"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.4</span><span class="p">,</span><span class="w"> </span><span class="nt">"cacheWrite"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"range"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">200000</span><span class="p">]</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="p">]</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>This is a real, fully-implemented OpenClaw core schema field, not a Google-specific or provider-specific invention — confirmed directly in the installed package's cost-resolution code (<code>usage-cost-*.mjs</code>'s <code>selectPricingRates</code>): tiers are sorted by <code>range[0]</code>, and the tier whose range contains the call's total <code>input + cacheRead + cacheWrite</code> token count is selected and used for that call's pricing, independent of provider. <code>range</code> takes one or two numbers (<code>[start]</code> for an open-ended top tier, <code>[start, end]</code> for a bounded one); the base <code>cost</code> object above acts as the first/lowest tier. Once defined this way, this plugin (which only relays whatever <code>costUsd</code> core resolves and attaches no pricing logic of its own) reports it correctly — the fix lives entirely in <code>openclaw.json</code>'s model definition, not in this repo.</p>
+<hr />
+<h2 id="rateincrease-queries-can-show-zero-even-though-the-data-arrived-correctly"><code>rate()</code>/<code>increase()</code> queries can show zero even though the data arrived correctly<a class="headerlink" href="#rateincrease-queries-can-show-zero-even-though-the-data-arrived-correctly" title="Permanent link">&para;</a></h2>
+<p>This one is easy to mistake for a missing-metric bug (like the section above), but it's a PromQL/label-cardinality effect, not a reporting gap — the data point is really there, an instant query finds it, and only windowed-rate queries show nothing.</p>
+<p><strong>Why it happens:</strong> <code>openclaw.llm.cost.usd</code> and the per-call <code>openclaw.llm.tokens.*</code> metrics carry <code>gen_ai.conversation.id</code> as a label, which is unique per conversation/session by design — that's what makes it possible to look up a single session's cost/tokens at all. But a Prometheus/Mimir time series is identified by its <em>full</em> label set, and <code>rate()</code>/<code>increase()</code> work by diffing two samples of the <em>same</em> series over a window. If a conversation only ever produces one export for that label combination — which is exactly what happens for an <strong>isolated session that runs once and exits</strong> (cron/scheduled jobs with <code>sessionTarget: "isolated"</code>, one-shot system/background turns) — the series is born with one sample at its final value and never gets a second one to diff against, at any window width. <code>increase()</code> evaluates this per full-label series <em>before</em> any <code>sum by (...)</code> aggregation runs, so the series contributes exactly <code>0</code> to a coarser query too (e.g. <code>sum by (gen_ai_response_model) (increase(openclaw_llm_cost_usd[$__rate_interval]))</code>) — silently, with no visible empty row to flag it. An instant query (or Mimir/Prometheus's series API) against the same series shows the real value with no trouble.</p>
+<p><strong>This isn't unique to isolated/one-shot sessions.</strong> Any conversation whose LLM calls all land inside a single metrics-export interval (<code>metricsIntervalMs</code>, 30s default) hits the same blind spot even with per-call instrumentation (0.11.0+) — a two-call burst that completes within one export tick still produces only one sample for that conversation's series. Per-call instrumentation only escapes this when a conversation's calls are spread across more than one export tick.</p>
+<p><strong>Workaround:</strong> for trend/dashboard panels that don't need per-conversation granularity, query with an instant/last-value approach (e.g. <code>sum by (gen_ai_response_model) (openclaw_llm_cost_usd)</code> without <code>increase()</code>/<code>rate()</code>, read as a running total rather than a delta) or pre-aggregate outside Prometheus. There's no query-side fix that preserves both per-conversation lookup and a reliable windowed delta from the same metric — the label that makes lookup possible is exactly the label that makes the series one-shot.</p>
+<p><strong>Fixed for LLM metrics as of <code>0.12.0</code>, opt-in — with one remaining gap.</strong> Every per-conversation LLM metric now has a <code>_by_model</code> sibling (<code>enableByModelMetrics: true</code>, see <a href="../configuration/">Configuration</a>) — same value, same attributes, but with <code>gen_ai.conversation.id</code>/<code>gen_ai.agent.id</code> dropped, so the series accumulates across every call to that provider+model instead of starting fresh per conversation:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sum by (gen_ai_response_model) (increase(openclaw_llm_cost_usd_by_model[$__rate_interval]))
+</span></code></pre></div>
+<p>This closes the blind spot for the case it's meant for — a <code>_by_model</code> series for a given provider+model keeps accumulating samples across every conversation that uses it, for as long as the gateway process runs, so a one-shot session's contribution lands on an already-warm series and is immediately diffable. It does <strong>not</strong> eliminate the underlying mechanism entirely: a <code>_by_model</code> series is still born flat on its very first sample, same as any series — so a provider+model used for the first time since the last gateway restart (or a <code>token.type</code>/error variant seen for the first time) still contributes <code>0</code> to a windowed query exactly once, the same way the raw per-conversation metric always does. In practice this shrinks the blind spot from "once per conversation, forever" to "once per provider+model (and <code>token.type</code>) per gateway process lifetime" — a much smaller window, but not strictly zero. See <a href="../telemetry/metrics/#_by_model-metrics-opt-in">Metrics Reference</a> for the full list of 9 siblings. Off by default: enabling it roughly doubles the number of LLM metric data points this plugin emits, which has a direct cost impact if your metrics backend is a managed service billed by data volume or storage — check its pricing before enabling. Tool metrics (<code>openclaw.tool.*</code>) have the same blind spot but don't have a <code>_by_model</code> sibling yet.</p>
+<p><strong><code>collapseEphemeralSessions</code> can incidentally help too, but isn't the fix to reach for.</strong> That option (see <a href="../configuration/">Configuration</a>) exists as a dashboard-<em>legibility</em> feature — fewer, more readable rows for a recurring job's "tokens by session" panel — not as a fix for this blind spot. As a side effect, once a recurring job's collapsed series has accumulated more than one sample across multiple runs, that series does become diffable the same way any multi-sample series is. But this isn't guaranteed: a collapsed series can still be effectively one-shot if the underlying job runs infrequently relative to <code>metricsIntervalMs</code>, or if it's the collapsed series' very first run. If what you actually need is a metric that's reliably rate-able regardless of how often a session recurs, reach for <code>enableByModelMetrics</code> above — that's the feature built specifically for this problem, not <code>collapseEphemeralSessions</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/th-m-vogel/openclaw-observability-plugin" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "content.code.annotate", "navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "toc.follow", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>
